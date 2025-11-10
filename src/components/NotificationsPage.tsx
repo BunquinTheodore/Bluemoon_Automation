@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from './ui/avatar';
 import { Screen, Task } from '../App';
 import { ArrowLeft, Bell, CheckCircle2, Clock, Image as ImageIcon, Trash2, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 
 interface NotificationsPageProps {
   onBack: () => void;
@@ -260,7 +260,7 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => {
+                          onClick={(e: MouseEvent<HTMLButtonElement>) => {
                             e.stopPropagation();
                             handleDeleteNotification(notification.id);
                           }}

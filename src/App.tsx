@@ -34,10 +34,12 @@ export interface Task {
   id: string;
   name: string;
   qrCodeId: string;
-  station: 'kitchen' | 'coffee-bar';
-  category: 'opening' | 'closing';
-  description: string;
-  status: 'pending' | 'completed';
+  description?: string;
+  location?: string;
+  branch?: string;
+  station?: 'kitchen' | 'coffee-bar';
+  category?: 'opening' | 'closing';
+  status?: 'pending' | 'completed';
   assignedBy?: string;
   repetition?: 'daily' | 'weekly';
 }
