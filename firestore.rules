@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isOwner() {
+      return getUserRole() == 'owner';
+    }
+    
+    function isManager() {
+      return getUserRole() == 'manager';
+    }
+    
+    function isEmployee() {
+      return getUserRole() == 'employee';
+    }
+    
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner() || request.auth.uid == userId;
+    }
+    
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /taskSubmissions/{submissionId} {
+      allow read: if isAuthenticated();
+      allow create: if isEmployee();
+      allow update, delete: if isOwner() || isManager();
+    }
+    
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /inventory/{inventoryId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    match /financialReports/{reportId} {
+      allow read: if isOwner() || isManager();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /apepoReports/{reportId} {
+      allow read: if isOwner() || isManager();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /requests/{requestId} {
+      allow read: if isOwner() || isManager();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /payroll/{payrollId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /managerTasks/{managerTaskId} {
+      allow read: if isOwner() || isManager();
+      allow write: if isOwner() || isManager();
+    }
+    
+    match /recipes/{recipeId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner() || isManager();
+      
+      match /views/{viewId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+    
+    match /notifications/{notificationId} {
+      allow read, update: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
+      allow create, delete: if isOwner() || isManager();
+    }
+    
+    match /branches/{branchId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
+    
+    match /settings/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
+  }
+}
