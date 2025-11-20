@@ -1,26 +1,26 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
+import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
+import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+    Camera,
+    CheckCircle2,
+    ChefHat,
+    Coffee,
+    LogOut,
+    Package,
+    Plus
+} from 'lucide-react';
+import { motion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { Screen, Task, User } from '../App';
+import { db } from '../lib/firebase';
 import { Avatar, AvatarFallback } from './ui/avatar';
-import { User, Screen, Task } from '../App';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Button } from './ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { 
-  LogOut,
-  Coffee,
-  Camera,
-  CheckCircle2,
-  ChefHat,
-  Package,
-  Plus
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner@2.0.3';
-import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 interface EmployeeDashboardProps {
   user: User;
@@ -106,6 +106,37 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
   const [newProductLoose, setNewProductLoose] = useState('');
   const [inventoryStation, setInventoryStation] = useState<'kitchen' | 'coffee-bar'>('kitchen');
 
+  useEffect(() => {
+    const fetchInventory = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'inventory'));
+        if (!snapshot.empty) {
+          const items: InventoryItem[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
+            const loose = typeof data.loose === 'number' ? data.loose : 0;
+            const total = typeof data.total === 'number' ? data.total : sealed + loose;
+            return {
+              id: data.inventoryId || docSnap.id,
+              productName: data.productName || '',
+              unit: data.unit || '',
+              sealed,
+              loose,
+              delivered: total,
+              dateDelivered: data.dateDelivered || new Date().toISOString().split('T')[0],
+              station: data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
+            };
+          });
+          setInventory(items);
+        }
+      } catch (error) {
+        console.error('Error loading inventory from Firestore', error);
+      }
+    };
+
+    fetchInventory();
+  }, []);
+
   const handleScanQR = (task: Task) => {
     onNavigate('qr-scan', task);
   };
@@ -123,8 +154,22 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
       return;
     }
 
-    const sealed = parseInt(newProductSealed);
-    const loose = parseInt(newProductLoose);
+    const sealed = Number(newProductSealed);
+    const loose = Number(newProductLoose);
+
+    const isInvalid =
+      !Number.isFinite(sealed) ||
+      !Number.isFinite(loose) ||
+      !Number.isInteger(sealed) ||
+      !Number.isInteger(loose) ||
+      sealed < 0 ||
+      loose < 0;
+
+    if (isInvalid) {
+      toast.error('Invalid Input');
+      return;
+    }
+
     const delivered = sealed + loose;
 
     const newItem: InventoryItem = {
@@ -148,8 +193,19 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
   const handleUpdateInventory = (id: string, field: 'sealed' | 'loose', value: string) => {
     setInventory(inventory.map(item => {
       if (item.id === id) {
-        const newValue = parseInt(value) || 0;
-        const updatedItem = { ...item, [field]: newValue };
+        const numericValue = Number(value);
+
+        const isInvalid =
+          !Number.isFinite(numericValue) ||
+          !Number.isInteger(numericValue) ||
+          numericValue < 0;
+
+        if (isInvalid) {
+          toast.error('Invalid Input');
+          return item;
+        }
+
+        const updatedItem = { ...item, [field]: numericValue };
         updatedItem.delivered = updatedItem.sealed + updatedItem.loose;
         updatedItem.dateDelivered = new Date().toISOString().split('T')[0];
         return updatedItem;
@@ -160,8 +216,55 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
 
 
 
-  const handleSubmitInventory = () => {
-    toast.success('Inventory submitted to manager!');
+  const handleSubmitInventory = async (station: 'kitchen' | 'coffee-bar') => {
+    try {
+      const itemsForStation = inventory.filter(item => item.station === station);
+
+      if (itemsForStation.length === 0) {
+        toast.error('No inventory items to submit for this station');
+        return;
+      }
+
+      const writes = itemsForStation.map(async (item) => {
+        const invRef = doc(collection(db, 'inventory'), item.id);
+        const total = item.sealed + item.loose;
+        const dateDelivered = item.dateDelivered || new Date().toISOString().split('T')[0];
+
+        await setDoc(invRef, {
+          inventoryId: item.id,
+          productName: item.productName,
+          unit: item.unit,
+          sealed: item.sealed,
+          loose: item.loose,
+          total,
+          station: item.station,
+          branch: 'default',
+          status: 'good',
+          dateDelivered,
+          lastUpdated: serverTimestamp(),
+          updatedBy: user.id,
+        }, { merge: true });
+
+        const historyRef = doc(collection(invRef, 'history'));
+        await setDoc(historyRef, {
+          historyId: historyRef.id,
+          sealed: item.sealed,
+          loose: item.loose,
+          total,
+          action: 'updated',
+          changedBy: user.id,
+          changedByName: user.name,
+          timestamp: serverTimestamp(),
+          notes: 'Employee inventory submission',
+        });
+      });
+
+      await Promise.all(writes);
+      toast.success('Inventory submitted to manager!');
+    } catch (error) {
+      console.error('Error submitting inventory', error);
+      toast.error('Failed to submit inventory. Please try again.');
+    }
   };
 
   return (
@@ -432,12 +535,14 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Select>
                       <Input
                         type="number"
+                        min={0}
                         placeholder="Sealed qty"
                         value={newProductSealed}
                         onChange={(e) => setNewProductSealed(e.target.value)}
                       />
                       <Input
                         type="number"
+                        min={0}
                         placeholder="Loose qty"
                         value={newProductLoose}
                         onChange={(e) => setNewProductLoose(e.target.value)}
@@ -461,7 +566,10 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {inventory.filter(item => item.station === 'kitchen').map((item) => (
+                          {inventory
+                            .filter(item => item.station === 'kitchen')
+                            .filter(item => item.productName && item.productName.trim().length > 0)
+                            .map((item) => (
                             <TableRow key={item.id}>
                               <TableCell>{item.productName}</TableCell>
                               <TableCell>{item.unit}</TableCell>
@@ -493,7 +601,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Table>
                     </div>
 
-                    <Button onClick={handleSubmitInventory} className="w-full bg-cyan-600 hover:bg-cyan-700">
+                    <Button onClick={() => handleSubmitInventory('kitchen')} className="w-full bg-cyan-600 hover:bg-cyan-700">
                       Submit Kitchen Inventory to Manager
                     </Button>
                   </CardContent>
@@ -535,12 +643,14 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Select>
                       <Input
                         type="number"
+                        min={0}
                         placeholder="Sealed qty"
                         value={newProductSealed}
                         onChange={(e) => setNewProductSealed(e.target.value)}
                       />
                       <Input
                         type="number"
+                        min={0}
                         placeholder="Loose qty"
                         value={newProductLoose}
                         onChange={(e) => setNewProductLoose(e.target.value)}
@@ -564,7 +674,10 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {inventory.filter(item => item.station === 'coffee-bar').map((item) => (
+                          {inventory
+                            .filter(item => item.station === 'coffee-bar')
+                            .filter(item => item.productName && item.productName.trim().length > 0)
+                            .map((item) => (
                             <TableRow key={item.id}>
                               <TableCell>{item.productName}</TableCell>
                               <TableCell>{item.unit}</TableCell>
@@ -596,7 +709,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Table>
                     </div>
 
-                    <Button onClick={handleSubmitInventory} className="w-full bg-cyan-600 hover:bg-cyan-700">
+                    <Button onClick={() => handleSubmitInventory('coffee-bar')} className="w-full bg-cyan-600 hover:bg-cyan-700">
                       Submit Coffee Bar Inventory to Manager
                     </Button>
                   </CardContent>

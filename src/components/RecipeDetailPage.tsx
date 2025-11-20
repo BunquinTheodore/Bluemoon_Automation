@@ -1,11 +1,11 @@
+import { ArrowLeft, Check, ChevronDown, Coffee, LogOut, Play } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
+import { toast } from 'sonner';
 import { Recipe } from '../App';
-import { ArrowLeft, LogOut, Check, ChevronDown, ChevronUp, Coffee, Play } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner@2.0.3';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 
 interface RecipeDetailPageProps {

@@ -1,44 +1,44 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
-import { Avatar, AvatarFallback } from './ui/avatar';
-import { User, Screen } from '../App';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Badge } from './ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Checkbox } from './ui/checkbox';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
-import { Calendar } from './ui/calendar';
+import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
+import { collection, getDocs } from 'firebase/firestore';
 import {
-  LogOut,
-  ClipboardList,
-  FileBarChart,
-  Package,
-  ShoppingCart,
-  Wallet,
-  Users,
-  Plus,
-  Trash2,
-  Edit,
+  Calendar as CalendarIcon,
+  Camera,
   CheckCircle2,
   ChevronDown,
-  ChevronUp,
-  Upload,
-  AlertTriangle,
-  Calendar as CalendarIcon,
-  Image,
-  Camera,
-  ShoppingBag,
+  ClipboardList,
   DollarSign,
-  Sparkles
+  Edit,
+  FileBarChart,
+  Image,
+  LogOut,
+  Package,
+  Plus,
+  ShoppingBag,
+  ShoppingCart,
+  Sparkles,
+  Trash2,
+  Upload,
+  Users,
+  Wallet
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { toast } from 'sonner@2.0.3';
-import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { Screen, User } from '../App';
+import { db } from '../lib/firebase';
+import { Avatar, AvatarFallback } from './ui/avatar';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Calendar } from './ui/calendar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Checkbox } from './ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Textarea } from './ui/textarea';
 
 interface ManagerDashboardProps {
   user: User;
@@ -150,12 +150,48 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   const [expenses, setExpenses] = useState('');
 
   // Inventory State
-  const [inventory, setInventory] = useState(mockInventory);
+  const [inventory, setInventory] = useState<InventoryItemExtended[]>([]);
   const [newProductName, setNewProductName] = useState('');
   const [newProductSealed, setNewProductSealed] = useState('');
   const [newProductLoose, setNewProductLoose] = useState('');
   const [newProductUnit, setNewProductUnit] = useState('kg');
   const [wastedInventoryImage, setWastedInventoryImage] = useState<File | null>(null);
+
+  useEffect(() => {
+    const fetchInventory = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'inventory'));
+        if (!snapshot.empty) {
+          const items: InventoryItemExtended[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
+            const loose = typeof data.loose === 'number' ? data.loose : 0;
+            const unit = data.unit || '';
+            const lastUpdatedRaw = (data as any).lastUpdated;
+            const lastUpdated = lastUpdatedRaw && typeof lastUpdatedRaw.toDate === 'function'
+              ? lastUpdatedRaw.toDate()
+              : new Date();
+            const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
+
+            return {
+              id: data.inventoryId || docSnap.id,
+              productName: data.productName || '',
+              sealed,
+              loose,
+              unit,
+              lastUpdated,
+              station,
+            };
+          });
+          setInventory(items);
+        }
+      } catch (error) {
+        console.error('Error loading inventory from Firestore', error);
+      }
+    };
+
+    fetchInventory();
+  }, []);
 
   // Request State
   const [requestItemName, setRequestItemName] = useState('');
@@ -224,6 +260,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       loose: parseInt(newProductLoose),
       unit: newProductUnit,
       lastUpdated: new Date(),
+      station: 'kitchen',
     };
 
     setInventory([...inventory, newItem]);
@@ -931,24 +968,27 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {inventory.filter(item => item.station === 'kitchen').map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell>{item.productName}</TableCell>
-                              <TableCell>{item.unit}</TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.sealed}</span>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.loose}</span>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.sealed + item.loose}</span>
-                              </TableCell>
-                              <TableCell className="text-sm text-gray-500">
-                                {item.lastUpdated.toLocaleDateString()}
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {inventory
+                            .filter(item => item.station === 'kitchen')
+                            .filter(item => item.productName && item.productName.trim().length > 0)
+                            .map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{item.productName}</TableCell>
+                                <TableCell>{item.unit}</TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.sealed}</span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.loose}</span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.sealed + item.loose}</span>
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-500">
+                                  {item.lastUpdated.toLocaleDateString()}
+                                </TableCell>
+                              </TableRow>
+                            ))}
                         </TableBody>
                       </Table>
                     </div>
@@ -978,24 +1018,27 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {inventory.filter(item => item.station === 'coffee-bar').map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell>{item.productName}</TableCell>
-                              <TableCell>{item.unit}</TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.sealed}</span>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.loose}</span>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <span className="text-gray-700">{item.sealed + item.loose}</span>
-                              </TableCell>
-                              <TableCell className="text-sm text-gray-500">
-                                {item.lastUpdated.toLocaleDateString()}
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {inventory
+                            .filter(item => item.station === 'coffee-bar')
+                            .filter(item => item.productName && item.productName.trim().length > 0)
+                            .map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>{item.productName}</TableCell>
+                                <TableCell>{item.unit}</TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.sealed}</span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.loose}</span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-gray-700">{item.sealed + item.loose}</span>
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-500">
+                                  {item.lastUpdated.toLocaleDateString()}
+                                </TableCell>
+                              </TableRow>
+                            ))}
                         </TableBody>
                       </Table>
                     </div>

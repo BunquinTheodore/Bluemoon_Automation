@@ -1,12 +1,12 @@
-import { useState, useRef } from 'react';
+import { Camera, CheckCircle2, RotateCcw, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Task, User } from '../App';
 import { Button } from './ui/button';
+import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Card } from './ui/card';
-import { Task, User } from '../App';
-import { Camera, X, RotateCcw, Send, CheckCircle2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner@2.0.3';
 
 interface QRScanScreenProps {
   task: Task;
