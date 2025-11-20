@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { Card, CardContent } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { Recipe, Screen } from '../App';
-import { Search, Moon, LogOut, Play, Clock, Coffee } from 'lucide-react';
+import { Clock, Coffee, LogOut, Play, Search } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useState } from 'react';
+import { Recipe, Screen } from '../App';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent } from './ui/card';
+import { Input } from './ui/input';
 
 interface RecipesListPageProps {
   onNavigate: (screen: Screen, task?: any, recipe?: Recipe) => void;
@@ -15,127 +15,168 @@ interface RecipesListPageProps {
 
 const mockRecipes: Recipe[] = [
   {
-    id: '1',
-    name: 'Iced Latte',
-    description: '3-step espresso-based cold drink',
-    imageUrl: 'https://images.unsplash.com/photo-1684548856346-041e1a90d630?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpY2VkJTIwbGF0dGUlMjBjb2ZmZWV8ZW58MXx8fHwxNzYxMTE2MDAzfDA&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '2:30',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['2 shots of espresso', '8 oz cold milk', 'Ice cubes', 'Simple syrup (optional)'],
+    id: 'coffee-amber-iced',
+    name: 'Amber (Iced Coffee)',
+    description: 'Video tutorial for Amber iced coffee recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1sblIZmL_P3g_Dbluh_-g1Hmn4IYrk1bW/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Fill a tall glass with ice cubes',
-      'Pour 2 shots of freshly brewed espresso over the ice',
-      'Add cold milk slowly to create layers',
-      'Stir gently and add sweetener if desired'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Espresso machine', 'Tall glass', 'Ice scoop', 'Stirring spoon'],
-    category: 'Cold Drinks'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
   },
   {
-    id: '2',
-    name: 'Cappuccino',
-    description: 'Classic Italian espresso with foam',
-    imageUrl: 'https://images.unsplash.com/photo-1708430651927-20e2e1f1e8f7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYXBwdWNjaW5vJTIwY29mZmVlfGVufDF8fHx8MTc2MTA3NTQxMHww&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '3:00',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['2 shots of espresso', '4 oz steamed milk', 'Milk foam', 'Cocoa powder (optional)'],
+    id: 'coffee-americano-iced',
+    name: 'Americano (Iced Coffee)',
+    description: 'Video tutorial for Iced Americano recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1e5eLhSfafVQRSCPY1YpCn7LQOJO3hNkY/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Brew 2 shots of espresso into a cappuccino cup',
-      'Steam milk to create microfoam texture',
-      'Pour steamed milk over espresso',
-      'Top with thick layer of foam',
-      'Dust with cocoa powder if desired'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Espresso machine', 'Steam wand', 'Cappuccino cup', 'Thermometer'],
-    category: 'Hot Drinks'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
   },
   {
-    id: '3',
-    name: 'Espresso Shot',
-    description: 'Perfect single or double shot',
-    imageUrl: 'https://images.unsplash.com/photo-1705952285570-113e76f63fb0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxlc3ByZXNzbyUyMHNob3R8ZW58MXx8fHwxNzYxMDE3NTg1fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '1:45',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['18-20g fresh coffee beans', 'Filtered water'],
+    id: 'coffee-la-creme-cloud-iced',
+    name: 'La Creme Cloud (Iced Coffee)',
+    description: 'Video tutorial for La Creme Cloud iced coffee recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1gzSFci5EebZk5DrGPLgwtoj4fAeyQT_i/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Grind 18-20g of coffee beans to fine consistency',
-      'Distribute grounds evenly in portafilter',
-      'Tamp with 30 lbs of pressure',
-      'Lock portafilter into group head',
-      'Extract for 25-30 seconds',
-      'Should yield 1.5-2 oz of espresso'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Espresso machine', 'Grinder', 'Tamper', 'Portafilter', 'Scale'],
-    category: 'Hot Drinks'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
   },
   {
-    id: '4',
-    name: 'Latte Art Basics',
-    description: 'Master the heart and rosetta',
-    imageUrl: 'https://images.unsplash.com/photo-1680489809506-d8def0e1631f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsYXR0ZSUyMGFydCUyMGNvZmZlZXxlbnwxfHx8fDE3NjEwMzg0MTl8MA&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '4:15',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['2 shots of espresso', '8 oz whole milk'],
+    id: 'coffee-latte-iced',
+    name: 'Latte (Iced Coffee)',
+    description: 'Video tutorial for Iced Latte recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1YgY4knW9Su3t6Co0F8FUQXuY5v5nPpzO/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Brew espresso into a wide latte cup',
-      'Steam milk to create silky microfoam (140-150°F)',
-      'Tap pitcher to remove large bubbles',
-      'Pour milk from higher position to mix',
-      'Lower pitcher close to surface',
-      'Create design by controlling flow and movement'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Espresso machine', 'Steam pitcher', 'Wide latte cup', 'Thermometer'],
-    category: 'Techniques'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
   },
   {
-    id: '5',
-    name: 'Mocha',
-    description: 'Chocolate espresso indulgence',
-    imageUrl: 'https://images.unsplash.com/photo-1649023384041-555d35454897?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2NoYSUyMGNvZmZlZSUyMGRyaW5rfGVufDF8fHx8MTc2MTAyMDM5NXww&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '2:45',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['2 shots of espresso', '1 oz chocolate syrup', '8 oz steamed milk', 'Whipped cream', 'Chocolate shavings'],
+    id: 'coffee-sbb-latte-iced',
+    name: 'SBB Latte (Iced Coffee)',
+    description: 'Video tutorial for SBB Latte iced coffee recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1VxcBTcN1NVdOk_sfHIqavbA0yDRgZvi5/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Add chocolate syrup to cup',
-      'Brew 2 shots of espresso over syrup',
-      'Stir to combine chocolate and espresso',
-      'Steam milk to 150°F',
-      'Pour steamed milk over espresso mixture',
-      'Top with whipped cream and chocolate shavings'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Espresso machine', 'Steam wand', 'Spoon', 'Cup'],
-    category: 'Hot Drinks'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
   },
   {
-    id: '6',
-    name: 'Matcha Latte',
-    description: 'Smooth green tea latte',
-    imageUrl: 'https://images.unsplash.com/photo-1582785513054-8d1bf9d69c1a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtYXRjaGElMjBsYXR0ZXxlbnwxfHx8fDE3NjExMjEwNTB8MA&ixlib=rb-4.1.0&q=80&w=1080',
-    videoDuration: '2:00',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    ingredients: ['2 tsp matcha powder', '2 oz hot water', '8 oz steamed milk', 'Sweetener (optional)'],
+    id: 'coffee-spanish-latte-iced',
+    name: 'Spanish Latte (Iced Coffee)',
+    description: 'Video tutorial for Spanish Latte iced coffee recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1peMDqUJ8Zpho7k1Rc7sXlUpSvn__7BWk/preview',
+    ingredients: ['See training video for full recipe details.'],
     steps: [
-      'Sift matcha powder into a bowl to remove clumps',
-      'Add hot water (not boiling)',
-      'Whisk vigorously in M or W pattern until frothy',
-      'Pour matcha into serving cup',
-      'Steam milk to desired temperature',
-      'Pour steamed milk over matcha',
-      'Create latte art if desired'
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
     ],
-    tools: ['Matcha whisk (chasen)', 'Bowl', 'Sifter', 'Steam wand', 'Cup'],
-    category: 'Hot Drinks'
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
+  },
+  {
+    id: 'coffee-spiced-latte-iced',
+    name: 'Spiced Latte (Iced Coffee)',
+    description: 'Video tutorial for Spiced Latte iced coffee recipe.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1ldT-EtlES9PS9GaTzQ43bD3JgRoraLIY/preview',
+    ingredients: ['See training video for full recipe details.'],
+    steps: [
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
+    ],
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Coffee (Iced)',
+  },
+  {
+    id: 'noncoffee-biscoff-cloud-iced',
+    name: 'Biscoff Cloud (Non-Coffee, Iced)',
+    description: 'Video tutorial for Biscoff Cloud non-coffee iced drink.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1nb13UWfpQXMqD7cWJ2_7rn6Ypb1bu4d-/preview',
+    ingredients: ['See training video for full recipe details.'],
+    steps: [
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
+    ],
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Non-Coffee (Iced)',
+  },
+  {
+    id: 'noncoffee-matcha-iced',
+    name: 'Matcha (Non-Coffee, Iced)',
+    description: 'Video tutorial for Matcha non-coffee iced drink.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1ffWkTTIAe46Hnh97UnvyHrzmvMGAgrO0/preview',
+    ingredients: ['See training video for full recipe details.'],
+    steps: [
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
+    ],
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Non-Coffee (Iced)',
+  },
+  {
+    id: 'noncoffee-signature-chocolate-iced',
+    name: 'Signature Chocolate (Non-Coffee, Iced)',
+    description: 'Video tutorial for Signature Chocolate non-coffee iced drink.',
+    imageUrl: '',
+    videoDuration: 'N/A',
+    videoUrl: 'https://drive.google.com/file/d/1_rMcwUTzxhG_t60ubYubXWkzdnjA8xnB/preview',
+    ingredients: ['See training video for full recipe details.'],
+    steps: [
+      'Press play on the video tutorial.',
+      'Follow the preparation steps shown in the video.',
+    ],
+    tools: ['Tools and equipment as shown in the video.'],
+    category: 'Non-Coffee (Iced)',
   },
 ];
 
 export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
-  const filteredRecipes = mockRecipes.filter(recipe =>
-    recipe.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    recipe.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    recipe.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredRecipes = mockRecipes
+    .filter(recipe =>
+      recipe.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      recipe.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      recipe.description.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .filter(recipe => !activeCategory || recipe.category === activeCategory);
 
   const categories = Array.from(new Set(mockRecipes.map(r => r.category)));
 
@@ -190,8 +231,15 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
           {categories.map((category) => (
             <Badge
               key={category}
-              variant="outline"
-              className="px-4 py-2 cursor-pointer hover:bg-amber-100 border-amber-300"
+              variant={activeCategory === category ? 'default' : 'outline'}
+              onClick={() =>
+                setActiveCategory(activeCategory === category ? null : category)
+              }
+              className={
+                activeCategory === category
+                  ? 'px-4 py-2 cursor-pointer bg-amber-600 text-white border-amber-600'
+                  : 'px-4 py-2 cursor-pointer hover:bg-amber-100 border-amber-300'
+              }
             >
               {category}
             </Badge>
@@ -211,18 +259,13 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
               onClick={() => onNavigate('recipe-detail', undefined, recipe)}
             >
               <Card className="overflow-hidden border-amber-100 hover:shadow-2xl transition-all h-full">
-                {/* Image */}
+                {/* Video Preview (no photo thumbnail, gradient background only) */}
                 <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-amber-100 to-orange-100">
-                  <img
-                    src={recipe.imageUrl}
-                    alt={recipe.name}
-                    className="w-full h-full object-cover transition-transform duration-300 hover:scale-110"
-                  />
                   <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-2">
                     <Clock className="w-3 h-3 text-white" />
                     <span className="text-xs text-white">{recipe.videoDuration}</span>
                   </div>
-                  <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center">
                     <div className="bg-white/90 backdrop-blur-sm p-4 rounded-full">
                       <Play className="w-8 h-8 text-amber-600" />
                     </div>

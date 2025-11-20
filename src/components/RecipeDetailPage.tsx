@@ -66,26 +66,14 @@ export function RecipeDetailPage({ recipe, onBack, onLogout }: RecipeDetailPageP
           {/* Video Player */}
           <Card className="border-amber-100 overflow-hidden">
             <CardContent className="p-0">
-              <div className="relative aspect-video bg-gradient-to-br from-gray-900 to-gray-800">
-                {/* Video Placeholder */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="bg-amber-600 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 cursor-pointer hover:bg-amber-700 transition-colors">
-                      <Play className="w-10 h-10 text-white ml-1" />
-                    </div>
-                    <p className="text-white text-lg mb-2">Video Tutorial</p>
-                    <p className="text-gray-400 text-sm">Duration: {recipe.videoDuration}</p>
-                  </div>
-                </div>
-                
-                {/* Actual video embed would go here */}
-                {/* <iframe 
+              <div className="relative aspect-video bg-black">
+                <iframe
                   className="w-full h-full"
                   src={recipe.videoUrl}
                   title={recipe.name}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
-                /> */}
+                />
               </div>
             </CardContent>
           </Card>
