@@ -1,5 +1,6 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+
 import {
   Calendar as CalendarIcon,
   Camera,
@@ -100,9 +101,9 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     { id: '8', name: 'Sweep the floor', completed: false, type: 'weekly', day: 'Thursday', icon: Sparkles },
   ]);
 
-  // Employee Task Assignment
+  // Employee Task Assignment (generic for all employees)
   const [employeeTaskName, setEmployeeTaskName] = useState('');
-  const [employeeTaskAssignee, setEmployeeTaskAssignee] = useState('');
+  const [employeeTaskDescription, setEmployeeTaskDescription] = useState('');
   const [employeeTaskStation, setEmployeeTaskStation] = useState<'kitchen' | 'coffee-bar'>('kitchen');
   const [employeeTaskCategory, setEmployeeTaskCategory] = useState<'opening' | 'closing'>('opening');
   const [isEmployeeTaskOpen, setIsEmployeeTaskOpen] = useState(false);
@@ -213,16 +214,46 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     ));
   };
 
-  const handleAssignEmployeeTask = () => {
-    if (!employeeTaskName.trim() || !employeeTaskAssignee) {
-      toast.error('Please fill in all fields');
+  const handleAssignEmployeeTask = async () => {
+    if (!employeeTaskName.trim()) {
+      toast.error('Please fill in the task name');
       return;
     }
-    toast.success('Task assigned to employee!', {
-      description: `${employeeTaskName} assigned to ${employeeTaskAssignee}`,
-    });
-    setEmployeeTaskName('');
-    setEmployeeTaskAssignee('');
+
+    try {
+      const tasksCollection = collection(db, 'tasks');
+      const taskDocRef = doc(tasksCollection);
+      const qrCodeId = `TASK-${taskDocRef.id.slice(0, 8).toUpperCase()}`;
+
+      await setDoc(taskDocRef, {
+        taskId: taskDocRef.id,
+        name: employeeTaskName.trim(),
+        description: employeeTaskDescription.trim() || '',
+        station: employeeTaskStation,
+        category: employeeTaskCategory,
+        status: 'pending',
+        qrCodeId,
+        assignedBy: user.id,
+        assignedByName: user.name,
+        createdAt: serverTimestamp(),
+      });
+
+      const stationLabel = employeeTaskStation === 'kitchen' ? 'Kitchen' : 'Coffee Bar';
+      const categoryLabel = employeeTaskCategory === 'opening' ? 'Opening' : 'Closing';
+      const extraDetails = employeeTaskDescription && employeeTaskDescription.trim().length > 0
+        ? `\nDetails: ${employeeTaskDescription.trim()}`
+        : '';
+
+      toast.success('Task created for employees!', {
+        description: `${employeeTaskName} - Station: ${stationLabel}, Category: ${categoryLabel}${extraDetails}`,
+      });
+
+      setEmployeeTaskName('');
+      setEmployeeTaskDescription('');
+    } catch (error) {
+      console.error('Error creating task for employees', error);
+      toast.error('Failed to create task. Please try again.');
+    }
   };
 
   const handleSubmitApepo = () => {
@@ -520,7 +551,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="space-y-4 pt-0">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="employeeTaskName">Task Name</Label>
                         <Input
@@ -532,19 +563,13 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="employeeTaskAssignee">Assign To</Label>
-                        <Select value={employeeTaskAssignee} onValueChange={setEmployeeTaskAssignee}>
-                          <SelectTrigger id="employeeTaskAssignee">
-                            <SelectValue placeholder="Select employee" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {mockEmployees.map((emp) => (
-                              <SelectItem key={emp.id} value={emp.name}>
-                                {emp.name} - {emp.role}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label htmlFor="employeeTaskDescription">Task Description</Label>
+                        <Input
+                          id="employeeTaskDescription"
+                          placeholder="Optional details or instructions..."
+                          value={employeeTaskDescription}
+                          onChange={(e) => setEmployeeTaskDescription(e.target.value)}
+                        />
                       </div>
 
                       <div className="space-y-2">
@@ -576,7 +601,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
                     <Button onClick={handleAssignEmployeeTask} className="w-full bg-cyan-600 hover:bg-cyan-700">
                       <Plus className="w-4 h-4 mr-2" />
-                      Assign Task to Employee
+                      Create Task for Employees
                     </Button>
                   </CardContent>
                 </CollapsibleContent>

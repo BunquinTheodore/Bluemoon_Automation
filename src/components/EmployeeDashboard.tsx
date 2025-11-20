@@ -28,53 +28,6 @@ interface EmployeeDashboardProps {
   onLogout: () => void;
 }
 
-const mockTasks: Task[] = [
-  // Kitchen Opening Tasks
-  { id: '1', name: 'Wear proper gear/uniform', qrCodeId: 'QR-K-O-001', station: 'kitchen', category: 'opening', description: 'Put on chef coat, hat, and apron', status: 'pending' },
-  { id: '2', name: 'Turn on all equipment', qrCodeId: 'QR-K-O-002', station: 'kitchen', category: 'opening', description: 'Turn on ovens, stoves, and fryers', status: 'pending' },
-  { id: '3', name: 'Sanitize tables, sinks, cutting boards', qrCodeId: 'QR-K-O-003', station: 'kitchen', category: 'opening', description: 'Clean all surfaces with sanitizer', status: 'pending' },
-  { id: '4', name: 'Check dishwashing area', qrCodeId: 'QR-K-O-004', station: 'kitchen', category: 'opening', description: 'Ensure dishwasher is clean and ready', status: 'pending' },
-  { id: '5', name: 'Label and date open items', qrCodeId: 'QR-K-O-005', station: 'kitchen', category: 'opening', description: 'Label all opened ingredients with date', status: 'pending' },
-  { id: '6', name: 'Bring out ingredients from storage', qrCodeId: 'QR-K-O-006', station: 'kitchen', category: 'opening', description: 'Get ingredients from walk-in cooler', status: 'pending' },
-  { id: '7', name: 'Restock condiments and kitchen supplies', qrCodeId: 'QR-K-O-007', station: 'kitchen', category: 'opening', description: 'Refill salt, pepper, oils, etc.', status: 'pending' },
-  { id: '8', name: 'Sharpen knives and utensils', qrCodeId: 'QR-K-O-008', station: 'kitchen', category: 'opening', description: 'Sharpen all kitchen knives', status: 'pending' },
-  { id: '9', name: 'Check freezer temperature logs', qrCodeId: 'QR-K-O-009', station: 'kitchen', category: 'opening', description: 'Record freezer temperatures', status: 'pending' },
-  { id: '10', name: 'Smile Task', qrCodeId: 'QR-K-O-010', station: 'kitchen', category: 'opening', description: 'Greet team members with a smile', status: 'pending' },
-  
-  // Kitchen Closing Tasks
-  { id: '11', name: 'Clean all cooking equipment', qrCodeId: 'QR-K-C-001', station: 'kitchen', category: 'closing', description: 'Clean ovens, stoves, and fryers', status: 'pending' },
-  { id: '12', name: 'Sanitize all work surfaces', qrCodeId: 'QR-K-C-002', station: 'kitchen', category: 'closing', description: 'Wipe down all counters and tables', status: 'pending' },
-  { id: '13', name: 'Store perishables properly', qrCodeId: 'QR-K-C-003', station: 'kitchen', category: 'closing', description: 'Put all food in proper storage', status: 'pending' },
-  { id: '14', name: 'Sweep and mop kitchen floor', qrCodeId: 'QR-K-C-004', station: 'kitchen', category: 'closing', description: 'Clean entire kitchen floor', status: 'pending' },
-  { id: '15', name: 'Take out trash and recycling', qrCodeId: 'QR-K-C-005', station: 'kitchen', category: 'closing', description: 'Empty all trash bins', status: 'pending' },
-  { id: '16', name: 'Turn off all equipment', qrCodeId: 'QR-K-C-006', station: 'kitchen', category: 'closing', description: 'Power down all appliances', status: 'pending' },
-  { id: '17', name: 'Smile Task', qrCodeId: 'QR-K-C-007', station: 'kitchen', category: 'closing', description: 'Thank team members for their hard work', status: 'pending' },
-  
-  // Coffee Bar Opening Tasks
-  { id: '18', name: 'Turn on espresso machine', qrCodeId: 'QR-C-O-001', station: 'coffee-bar', category: 'opening', description: 'Power on and warm up espresso machine', status: 'pending' },
-  { id: '19', name: 'Clean group heads and portafilters', qrCodeId: 'QR-C-O-002', station: 'coffee-bar', category: 'opening', description: 'Backflush espresso machine', status: 'pending' },
-  { id: '20', name: 'Grind fresh coffee beans', qrCodeId: 'QR-C-O-003', station: 'coffee-bar', category: 'opening', description: 'Fill grinder with fresh beans', status: 'pending' },
-  { id: '21', name: 'Stock milk and dairy products', qrCodeId: 'QR-C-O-004', station: 'coffee-bar', category: 'opening', description: 'Fill milk fridges', status: 'pending' },
-  { id: '22', name: 'Restock cups, lids, and napkins', qrCodeId: 'QR-C-O-005', station: 'coffee-bar', category: 'opening', description: 'Refill all serving supplies', status: 'pending' },
-  { id: '23', name: 'Fill syrup pumps and toppings', qrCodeId: 'QR-C-O-006', station: 'coffee-bar', category: 'opening', description: 'Check and refill all flavor syrups', status: 'pending' },
-  { id: '24', name: 'Sanitize steam wands', qrCodeId: 'QR-C-O-007', station: 'coffee-bar', category: 'opening', description: 'Clean and purge steam wands', status: 'pending' },
-  { id: '25', name: 'Smile Task', qrCodeId: 'QR-C-O-008', station: 'coffee-bar', category: 'opening', description: 'Start the day with positive energy', status: 'pending' },
-  
-  // Coffee Bar Closing Tasks
-  { id: '26', name: 'Backflush espresso machine', qrCodeId: 'QR-C-C-001', station: 'coffee-bar', category: 'closing', description: 'Clean group heads thoroughly', status: 'pending' },
-  { id: '27', name: 'Clean drip trays and portafilters', qrCodeId: 'QR-C-C-002', station: 'coffee-bar', category: 'closing', description: 'Soak and clean all parts', status: 'pending' },
-  { id: '28', name: 'Wipe counters and equipment', qrCodeId: 'QR-C-C-003', station: 'coffee-bar', category: 'closing', description: 'Clean all surfaces and equipment', status: 'pending' },
-  { id: '29', name: 'Clean blenders and grinders', qrCodeId: 'QR-C-C-004', station: 'coffee-bar', category: 'closing', description: 'Disassemble and clean', status: 'pending' },
-  { id: '30', name: 'Sanitize steam wands', qrCodeId: 'QR-C-C-005', station: 'coffee-bar', category: 'closing', description: 'Clean and purge with steam', status: 'pending' },
-  { id: '31', name: 'Store milk and syrups', qrCodeId: 'QR-C-C-006', station: 'coffee-bar', category: 'closing', description: 'Properly store all perishables', status: 'pending' },
-  { id: '32', name: 'Discard expired items', qrCodeId: 'QR-C-C-007', station: 'coffee-bar', category: 'closing', description: 'Check dates and discard old milk', status: 'pending' },
-  { id: '33', name: 'Restock for tomorrow', qrCodeId: 'QR-C-C-008', station: 'coffee-bar', category: 'closing', description: 'Prepare cups, lids, napkins for next day', status: 'pending' },
-  { id: '34', name: 'Sweep and mop bar area', qrCodeId: 'QR-C-C-009', station: 'coffee-bar', category: 'closing', description: 'Clean entire coffee bar floor', status: 'pending' },
-  { id: '35', name: 'Take out trash', qrCodeId: 'QR-C-C-010', station: 'coffee-bar', category: 'closing', description: 'Empty all trash bins', status: 'pending' },
-  { id: '36', name: 'Turn off all equipment', qrCodeId: 'QR-C-C-011', station: 'coffee-bar', category: 'closing', description: 'Power down espresso machine, grinders, brewers', status: 'pending' },
-  { id: '37', name: 'Smile Task', qrCodeId: 'QR-C-C-012', station: 'coffee-bar', category: 'closing', description: 'End the day with gratitude', status: 'pending' },
-];
-
 interface InventoryItem {
   id: string;
   productName: string;
@@ -89,7 +42,7 @@ interface InventoryItem {
 export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashboardProps) {
   const [selectedStation, setSelectedStation] = useState<'kitchen' | 'coffee-bar'>('kitchen');
   const [selectedCategory, setSelectedCategory] = useState<'opening' | 'closing'>('opening');
-  const [tasks, setTasks] = useState(mockTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   // Inventory State
   const [inventory, setInventory] = useState<InventoryItem[]>([
@@ -134,7 +87,37 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
       }
     };
 
+    const fetchTasks = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'tasks'));
+        if (!snapshot.empty) {
+          const loadedTasks: Task[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
+            const category: 'opening' | 'closing' = data.category === 'closing' ? 'closing' : 'opening';
+            const status: 'pending' | 'completed' = data.status === 'completed' ? 'completed' : 'pending';
+
+            return {
+              id: data.taskId || docSnap.id,
+              name: data.name || '',
+              qrCodeId: data.qrCodeId || '',
+              description: data.description || '',
+              station,
+              category,
+              status,
+            };
+          });
+          setTasks(loadedTasks);
+        } else {
+          setTasks([]);
+        }
+      } catch (error) {
+        console.error('Error loading tasks from Firestore', error);
+      }
+    };
+
     fetchInventory();
+    fetchTasks();
   }, []);
 
   const handleScanQR = (task: Task) => {
