@@ -1,69 +1,93 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import { ArrowLeft, LogOut, FileText } from 'lucide-react';
+import { collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { ArrowLeft, FileText, LogOut, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { db } from '../lib/firebase';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent } from './ui/card';
 
 interface OwnerRequestsPageProps {
   onBack: () => void;
   onLogout: () => void;
 }
 
-const mockRequests = [
-  {
-    id: '1',
-    itemName: 'Espresso Beans (Premium Blend)',
-    quantity: 10,
-    unit: 'lbs',
-    priority: 'high' as const,
-    remarks: 'Running low, need for weekend rush',
-    manager: 'John Smith',
-    submittedAt: 'Oct 22, 2025 - 2:30 PM',
-  },
-  {
-    id: '2',
-    itemName: 'Trash Bags (Large)',
-    quantity: 5,
-    unit: 'boxes',
-    priority: 'high' as const,
-    remarks: 'Almost out, critical for daily operations',
-    manager: 'John Smith',
-    submittedAt: 'Oct 22, 2025 - 1:15 PM',
-  },
-  {
-    id: '3',
-    itemName: 'Vanilla Syrup',
-    quantity: 6,
-    unit: 'bottles',
-    priority: 'medium' as const,
-    remarks: 'Popular flavor, stock getting low',
-    manager: 'John Smith',
-    submittedAt: 'Oct 21, 2025 - 4:00 PM',
-  },
-  {
-    id: '4',
-    itemName: 'Paper Towels',
-    quantity: 3,
-    unit: 'cases',
-    priority: 'low' as const,
-    remarks: 'Still have some in stock but good to reorder',
-    manager: 'John Smith',
-    submittedAt: 'Oct 21, 2025 - 11:00 AM',
-  },
-  {
-    id: '5',
-    itemName: 'Almond Milk',
-    quantity: 12,
-    unit: 'cartons',
-    priority: 'medium' as const,
-    remarks: 'Customer demand increasing',
-    manager: 'John Smith',
-    submittedAt: 'Oct 20, 2025 - 3:30 PM',
-  },
-];
+interface ShopRequest {
+  id: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
+  priority: 'low' | 'medium' | 'high';
+  remarks: string;
+  manager: string;
+  submittedAt: Date;
+}
 
 export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) {
-  const highPriorityCount = mockRequests.filter(r => r.priority === 'high').length;
+  const [requests, setRequests] = useState<ShopRequest[]>([]);
+
+  useEffect(() => {
+    const requestsCollection = collection(db, 'requests');
+
+    const unsubscribe = onSnapshot(requestsCollection, (snapshot) => {
+      const loadedRequests: ShopRequest[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as any;
+          const submittedAtRaw = (data as any).submittedAt;
+          const submittedAt =
+            submittedAtRaw && typeof submittedAtRaw.toDate === 'function'
+              ? submittedAtRaw.toDate()
+              : new Date();
+
+          const quantityRaw = (data as any).quantity;
+          const quantity =
+            typeof quantityRaw === 'number' && Number.isFinite(quantityRaw) && quantityRaw > 0
+              ? quantityRaw
+              : 0;
+
+          return {
+            id: docSnap.id,
+            itemName: data.itemName || '',
+            quantity,
+            unit: data.unit || 'units',
+            priority:
+              (data.priority === 'high'
+                ? 'high'
+                : data.priority === 'medium'
+                ? 'medium'
+                : 'low') as 'low' | 'medium' | 'high',
+            remarks: data.remarks || '',
+            manager: data.managerName || 'Manager',
+            submittedAt,
+          };
+        })
+        .filter((request) => request.itemName.trim().length > 0 && request.quantity > 0);
+
+      loadedRequests.sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+      setRequests(loadedRequests);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const totalRequests = requests.length;
+  const highPriorityCount = requests.filter((r) => r.priority === 'high').length;
+
+  const handleDeleteRequest = async (id: string) => {
+    const confirmed = window.confirm('Are you sure you want to delete this request? This cannot be undone.');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'requests', id));
+      toast.success('Request deleted');
+    } catch (error) {
+      console.error('Error deleting request', error);
+      toast.error('Failed to delete request. Please try again.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -106,7 +130,7 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Total Requests</p>
-                    <p className="text-2xl text-cyan-700">{mockRequests.length}</p>
+                    <p className="text-2xl text-cyan-700">{totalRequests}</p>
                   </div>
                   <FileText className="w-8 h-8 text-cyan-600" />
                 </div>
@@ -131,7 +155,7 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
 
         {/* Requests List */}
         <div className="space-y-4">
-          {mockRequests.map((request, index) => (
+          {requests.map((request, index) => (
             <motion.div
               key={request.id}
               initial={{ opacity: 0, y: 20 }}
@@ -148,16 +172,27 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
                     <div className="flex-1">
                       <h3 className="text-lg text-gray-900 mb-1">{request.itemName}</h3>
                       <p className="text-sm text-gray-500">
-                        By {request.manager} • {request.submittedAt}
+                        By {request.manager} • {request.submittedAt.toLocaleString()}
                       </p>
                     </div>
-                    <Badge className={
-                      request.priority === 'high' ? 'bg-red-600' :
-                      request.priority === 'medium' ? 'bg-orange-500' :
-                      'bg-cyan-500'
-                    }>
-                      {request.priority.toUpperCase()}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className={
+                        request.priority === 'high' ? 'bg-red-600' :
+                        request.priority === 'medium' ? 'bg-orange-500' :
+                        'bg-cyan-500'
+                      }>
+                        {request.priority.toUpperCase()}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        onClick={() => handleDeleteRequest(request.id)}
+                        title="Delete request"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mb-4">

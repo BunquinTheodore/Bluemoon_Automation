@@ -295,47 +295,30 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   };
 
   const handleSubmitFinancialReport = () => {
-    if (!startingCash || !startingDigital || !startingBank || !turnoverCash || !turnoverDigital || !turnoverBank || !closingStartCash || !closingStartDigital || !closingStartBank || !closingTurnoverCash || !closingTurnoverDigital || !closingTurnoverBank) {
+    if (
+      !startingCash ||
+      !startingDigital ||
+      !startingBank ||
+      !turnoverCash ||
+      !turnoverDigital ||
+      !turnoverBank ||
+      !closingStartCash ||
+      !closingStartDigital ||
+      !closingStartBank ||
+      !closingTurnoverCash ||
+      !closingTurnoverDigital ||
+      !closingTurnoverBank
+    ) {
       toast.error('Please fill in all financial fields');
       return;
     }
+
     toast.success('Financial report submitted!');
     setFinancialStatus('pending');
   };
 
-  const handleAddInventoryItem = () => {
-    if (!newProductName.trim() || !newProductSealed || !newProductLoose) {
-      toast.error('Please fill in all product fields');
-      return;
-    }
-
-    const newItem: InventoryItemExtended = {
-      id: Date.now().toString(),
-      productName: newProductName,
-      sealed: parseInt(newProductSealed),
-      loose: parseInt(newProductLoose),
-      unit: newProductUnit,
-      lastUpdated: new Date(),
-      station: 'kitchen',
-    };
-
-    setInventory([...inventory, newItem]);
-    toast.success('Product added to inventory');
-    setNewProductName('');
-    setNewProductSealed('');
-    setNewProductLoose('');
-  };
-
-  const handleUpdateInventory = (id: string, field: 'sealed' | 'loose', change: number) => {
-    setInventory(inventory.map(item =>
-      item.id === id
-        ? { ...item, [field]: Math.max(0, item[field] + change), lastUpdated: new Date() }
-        : item
-    ));
-  };
-
   const handleDeleteInventoryItem = (id: string) => {
-    setInventory(inventory.filter(item => item.id !== id));
+    setInventory(inventory.filter((item) => item.id !== id));
     toast.success('Product removed from inventory');
   };
 
@@ -343,19 +326,45 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     toast.success('Inventory submitted to owner!');
   };
 
-  const handleSubmitRequest = () => {
+  const handleSubmitRequest = async () => {
     if (!requestItemName.trim() || !requestQuantity) {
       toast.error('Please fill in item name and quantity');
       return;
     }
 
-    toast.success('Request submitted to owner!', {
-      description: `${requestItemName} (Qty: ${requestQuantity}) - Priority: ${requestPriority}`,
-    });
+    const quantityNumber = parseInt(requestQuantity, 10);
+    if (!Number.isFinite(quantityNumber) || quantityNumber <= 0) {
+      toast.error('Quantity must be a positive number');
+      return;
+    }
 
-    setRequestItemName('');
-    setRequestQuantity('');
-    setRequestRemarks('');
+    try {
+      const requestsCollection = collection(db, 'requests');
+      const requestDocRef = doc(requestsCollection);
+
+      await setDoc(requestDocRef, {
+        requestId: requestDocRef.id,
+        itemName: requestItemName.trim(),
+        quantity: quantityNumber,
+        unit: 'units',
+        priority: requestPriority,
+        remarks: requestRemarks.trim(),
+        managerId: user.id,
+        managerName: user.name,
+        submittedAt: serverTimestamp(),
+      });
+
+      toast.success('Request submitted to owner!', {
+        description: `${requestItemName.trim()} (Qty: ${quantityNumber}) - Priority: ${requestPriority}`,
+      });
+
+      setRequestItemName('');
+      setRequestQuantity('');
+      setRequestRemarks('');
+    } catch (error) {
+      console.error('Error submitting request to owner', error);
+      toast.error('Failed to submit request. Please try again.');
+    }
   };
 
   const handleSubmitPayroll = () => {
@@ -399,6 +408,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       <header className="bg-white border-b border-cyan-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
+            {/* ... (rest of the code remains the same) */}
             <div className="flex items-center gap-3">
               <img src={logo} alt="Bluemoon" className="h-8" />
             </div>

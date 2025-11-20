@@ -46,6 +46,10 @@ service cloud.firestore {
     match /inventory/{inventoryId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
+      
+      match /history/{historyId} {
+        allow read, write: if isAuthenticated();
+      }
     }
     
     match /financialReports/{reportId} {
