@@ -1,5 +1,5 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
-import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 
 import {
   Calendar as CalendarIcon,
@@ -7,16 +7,13 @@ import {
   CheckCircle2,
   ChevronDown,
   ClipboardList,
-  DollarSign,
   Edit,
   FileBarChart,
   Image,
   LogOut,
   Package,
   Plus,
-  ShoppingBag,
   ShoppingCart,
-  Sparkles,
   Trash2,
   Upload,
   Users,
@@ -86,20 +83,35 @@ const mockInventory: InventoryItemExtended[] = [
 ];
 
 export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboardProps) {
-  // Manager's Own Tasks
-  const [managerTasks, setManagerTasks] = useState<ManagerTask[]>([
-    // Daily Tasks
-    { id: '1', name: 'Review daily sales report', completed: false, type: 'daily' },
-    { id: '2', name: 'Check equipment maintenance', completed: true, type: 'daily' },
-    { id: '3', name: 'Update employee schedule', completed: false, type: 'daily' },
-    { id: '4', name: 'Monitor inventory levels', completed: false, type: 'daily' },
-    
-    // Weekly Tasks
-    { id: '5', name: 'Order stocks', completed: false, type: 'weekly', day: 'Friday', icon: ShoppingBag },
-    { id: '6', name: 'Shopee orders', completed: false, type: 'weekly', day: 'Friday', icon: ShoppingCart },
-    { id: '7', name: 'Finance meeting', completed: false, type: 'weekly', day: 'Monday', icon: DollarSign },
-    { id: '8', name: 'Sweep the floor', completed: false, type: 'weekly', day: 'Thursday', icon: Sparkles },
-  ]);
+  // Manager's Own Tasks (loaded from Firestore managerTasks collection)
+  const [managerTasks, setManagerTasks] = useState<ManagerTask[]>([]);
+
+  useEffect(() => {
+    const tasksCollection = collection(db, 'managerTasks');
+
+    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
+      const loadedTasks: ManagerTask[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as any;
+          const status = (data as any).status === 'completed' ? 'completed' : 'pending';
+
+          return {
+            id: docSnap.id,
+            name: data.name || '',
+            completed: status === 'completed',
+            type: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
+            day: data.day,
+            icon: undefined,
+          };
+        })
+
+        .filter((task) => task.name.trim().length > 0);
+
+      setManagerTasks(loadedTasks);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Employee Task Assignment (generic for all employees)
   const [employeeTaskName, setEmployeeTaskName] = useState('');
@@ -208,10 +220,23 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   // Employee State
   const [employees, setEmployees] = useState(mockEmployees);
 
-  const handleToggleManagerTask = (id: string) => {
-    setManagerTasks(managerTasks.map(task =>
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ));
+  const handleToggleManagerTask = async (id: string) => {
+    const task = managerTasks.find((t) => t.id === id);
+    if (!task) {
+      return;
+    }
+
+    const newStatus = task.completed ? 'pending' : 'completed';
+
+    try {
+      const taskDocRef = doc(db, 'managerTasks', id);
+      await updateDoc(taskDocRef, {
+        status: newStatus,
+      });
+    } catch (error) {
+      console.error('Error updating manager task status', error);
+      toast.error('Failed to update task status. Please try again.');
+    }
   };
 
   const handleAssignEmployeeTask = async () => {

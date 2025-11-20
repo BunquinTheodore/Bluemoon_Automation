@@ -1,15 +1,17 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
+import { collection, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { ArrowLeft, Calendar, CalendarDays, CheckCircle2, Clock, LogOut, Plus, UserCog } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { db } from '../lib/firebase';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
-import { ArrowLeft, LogOut, UserCog, Plus, CheckCircle2, Clock, Calendar, CalendarDays } from 'lucide-react';
-import { motion } from 'motion/react';
-import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Textarea } from './ui/textarea';
 
 interface OwnerManagerTasksPageProps {
   onBack: () => void;
@@ -25,20 +27,44 @@ interface ManagerTask {
   status: 'pending' | 'completed';
 }
 
-const mockManagerTasks: ManagerTask[] = [
-  { id: '1', name: 'Review weekly sales report', description: 'Analyze sales data and prepare summary for owner review', taskType: 'weekly', assignedDate: new Date('2025-10-23'), status: 'pending' },
-  { id: '2', name: 'Check equipment maintenance', description: 'Inspect all kitchen and coffee bar equipment for maintenance needs', taskType: 'daily', assignedDate: new Date('2025-10-22'), status: 'completed' },
-  { id: '3', name: 'Update employee schedule', description: 'Review and finalize next week\'s work schedule', taskType: 'weekly', assignedDate: new Date('2025-10-23'), status: 'pending' },
-  { id: '4', name: 'Inventory audit completion', description: 'Complete full inventory count and update system', taskType: 'weekly', assignedDate: new Date('2025-10-21'), status: 'completed' },
-];
-
 export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPageProps) {
-  const [tasks, setTasks] = useState<ManagerTask[]>(mockManagerTasks);
+  const [tasks, setTasks] = useState<ManagerTask[]>([]);
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [taskType, setTaskType] = useState<'daily' | 'weekly'>('daily');
 
-  const handleAddTask = () => {
+  useEffect(() => {
+    const tasksCollection = collection(db, 'managerTasks');
+
+    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
+      const loadedTasks: ManagerTask[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as any;
+          const assignedDateRaw = (data as any).assignedDate;
+          const assignedDate =
+            assignedDateRaw && typeof assignedDateRaw.toDate === 'function'
+              ? assignedDateRaw.toDate()
+              : new Date();
+
+          return {
+            id: docSnap.id,
+            name: data.name || '',
+            description: data.description || '',
+            taskType: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
+            assignedDate,
+            status: (data.status === 'completed' ? 'completed' : 'pending') as 'pending' | 'completed',
+          };
+        })
+        .filter((task) => task.name.trim().length > 0);
+
+      loadedTasks.sort((a, b) => b.assignedDate.getTime() - a.assignedDate.getTime());
+      setTasks(loadedTasks);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleAddTask = async () => {
     if (!newTaskName.trim()) {
       toast.error('Please enter a task name');
       return;
@@ -49,20 +75,29 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
       return;
     }
 
-    const newTask: ManagerTask = {
-      id: Date.now().toString(),
-      name: newTaskName,
-      description: newTaskDescription,
-      taskType: taskType,
-      assignedDate: new Date(),
-      status: 'pending',
-    };
+    try {
+      const tasksCollection = collection(db, 'managerTasks');
+      const taskDocRef = doc(tasksCollection);
 
-    setTasks([newTask, ...tasks]);
-    toast.success(`${taskType === 'daily' ? 'Daily' : 'Weekly'} task assigned to manager!`);
-    setNewTaskName('');
-    setNewTaskDescription('');
-    setTaskType('daily');
+      await setDoc(taskDocRef, {
+        taskId: taskDocRef.id,
+        name: newTaskName.trim(),
+        description: newTaskDescription.trim(),
+        type: taskType,
+        status: 'pending',
+        assignedDate: serverTimestamp(),
+        createdByRole: 'owner',
+        assignedToRole: 'manager',
+      });
+
+      toast.success(`${taskType === 'daily' ? 'Daily' : 'Weekly'} task assigned to manager!`);
+      setNewTaskName('');
+      setNewTaskDescription('');
+      setTaskType('daily');
+    } catch (error) {
+      console.error('Error assigning manager task', error);
+      toast.error('Failed to assign task. Please try again.');
+    }
   };
 
   const pendingTasks = tasks.filter(t => t.status === 'pending');
