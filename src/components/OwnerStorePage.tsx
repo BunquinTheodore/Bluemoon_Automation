@@ -1,49 +1,126 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ArrowLeft, LogOut, Store, CheckCircle2, Clock, ChefHat, Coffee } from 'lucide-react';
 import { motion } from 'motion/react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerStorePageProps {
   onBack: () => void;
   onLogout: () => void;
 }
 
-const mockTasks = [
-  // Kitchen Tasks
-  { id: '1', name: 'Wear proper gear/uniform', station: 'Kitchen', category: 'Opening', status: 'completed', completedBy: 'Sarah Johnson', completedAt: '8:00 AM' },
-  { id: '2', name: 'Turn on all equipment', station: 'Kitchen', category: 'Opening', status: 'completed', completedBy: 'Sarah Johnson', completedAt: '8:05 AM' },
-  { id: '3', name: 'Sanitize tables, sinks, cutting boards', station: 'Kitchen', category: 'Opening', status: 'completed', completedBy: 'Mike Chen', completedAt: '8:15 AM' },
-  { id: '4', name: 'Check dishwashing area', station: 'Kitchen', category: 'Opening', status: 'pending' },
-  { id: '5', name: 'Label and date open items', station: 'Kitchen', category: 'Opening', status: 'pending' },
-  { id: '10', name: 'Clean all cooking equipment', station: 'Kitchen', category: 'Closing', status: 'pending' },
-  { id: '11', name: 'Sanitize all work surfaces', station: 'Kitchen', category: 'Closing', status: 'pending' },
-  { id: '12', name: 'Store perishables properly', station: 'Kitchen', category: 'Closing', status: 'pending' },
-
-  // Coffee Bar Tasks
-  { id: '16', name: 'Turn on espresso machine', station: 'Coffee Bar', category: 'Opening', status: 'completed', completedBy: 'Emma Davis', completedAt: '7:50 AM' },
-  { id: '17', name: 'Clean group heads and portafilters', station: 'Coffee Bar', category: 'Opening', status: 'completed', completedBy: 'Emma Davis', completedAt: '8:00 AM' },
-  { id: '18', name: 'Grind fresh coffee beans', station: 'Coffee Bar', category: 'Opening', status: 'completed', completedBy: 'James Wilson', completedAt: '8:10 AM' },
-  { id: '19', name: 'Stock milk and dairy products', station: 'Coffee Bar', category: 'Opening', status: 'pending' },
-  { id: '20', name: 'Restock cups, lids, and napkins', station: 'Coffee Bar', category: 'Opening', status: 'pending' },
-  { id: '23', name: 'Backflush espresso machine', station: 'Coffee Bar', category: 'Closing', status: 'pending' },
-  { id: '24', name: 'Clean drip trays and portafilters', station: 'Coffee Bar', category: 'Closing', status: 'pending' },
-];
+interface TaskData {
+  id: string;
+  name: string;
+  station: 'Kitchen' | 'Coffee Bar';
+  category: 'Opening' | 'Closing';
+  status: 'completed' | 'pending';
+  completedBy?: string;
+  completedAt?: string;
+}
 
 export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
   const [selectedStation, setSelectedStation] = useState<'all' | 'Kitchen' | 'Coffee Bar'>('all');
+  const [tasks, setTasks] = useState<TaskData[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredTasks = selectedStation === 'all' 
-    ? mockTasks 
-    : mockTasks.filter(task => task.station === selectedStation);
+  useEffect(() => {
+    const fetchTasksAndSubmissions = async () => {
+      try {
+        setLoading(true);
+
+        // Fetch all tasks
+        const tasksSnapshot = await getDocs(collection(db, 'tasks'));
+        const tasksData: { [key: string]: any } = {};
+
+        tasksSnapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          tasksData[data.taskId || doc.id] = {
+            id: data.taskId || doc.id,
+            name: data.name || '',
+            station: data.station === 'coffee-bar' ? 'Coffee Bar' : 'Kitchen',
+            category: data.category === 'opening' ? 'Opening' : 'Closing',
+            status: 'pending' as 'pending' | 'completed',
+          };
+        });
+
+        // Fetch all task submissions (completed tasks)
+        const submissionsSnapshot = await getDocs(collection(db, 'taskSubmissions'));
+        const today = new Date().toISOString().split('T')[0];
+
+        // Create a map to track the latest submission for each task today
+        const latestSubmissions: { [key: string]: any } = {};
+
+        submissionsSnapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const submissionDate = data.date || data.timestamp?.toDate().toISOString().split('T')[0];
+
+          // Only include today's submissions
+          if (submissionDate === today) {
+            const taskId = data.taskId;
+
+            // Keep only the latest submission for each task
+            if (!latestSubmissions[taskId] ||
+                (data.timestamp && data.timestamp.toMillis() > latestSubmissions[taskId].timestamp?.toMillis())) {
+              latestSubmissions[taskId] = data;
+            }
+          }
+        });
+
+        // Merge tasks with their submission data
+        const mergedTasks: TaskData[] = Object.values(tasksData).map((task: any) => {
+          const submission = latestSubmissions[task.id];
+
+          if (submission) {
+            const completedTime = submission.timestamp?.toDate();
+            const timeString = completedTime
+              ? completedTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+              : 'N/A';
+
+            return {
+              ...task,
+              status: 'completed' as 'completed' | 'pending',
+              completedBy: submission.employeeName || 'Unknown',
+              completedAt: timeString,
+            };
+          }
+
+          return task;
+        });
+
+        setTasks(mergedTasks);
+      } catch (error) {
+        console.error('Error fetching tasks:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTasksAndSubmissions();
+  }, []);
+
+  const filteredTasks = selectedStation === 'all'
+    ? tasks
+    : tasks.filter(task => task.station === selectedStation);
 
   const openingTasks = filteredTasks.filter(t => t.category === 'Opening');
   const closingTasks = filteredTasks.filter(t => t.category === 'Closing');
 
   const completedOpening = openingTasks.filter(t => t.status === 'completed').length;
   const completedClosing = closingTasks.filter(t => t.status === 'completed').length;
+
+  // Dashboard stats (using all tasks, not filtered)
+  const allOpeningTasks = tasks.filter(t => t.category === 'Opening');
+  const allClosingTasks = tasks.filter(t => t.category === 'Closing');
+  const allKitchenTasks = tasks.filter(t => t.station === 'Kitchen');
+  const allCoffeeBarTasks = tasks.filter(t => t.station === 'Coffee Bar');
+
+  const dashboardOpeningCompleted = allOpeningTasks.filter(t => t.status === 'completed').length;
+  const dashboardClosingCompleted = allClosingTasks.filter(t => t.status === 'completed').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
@@ -79,63 +156,69 @@ export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <Card className="border-green-100">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Opening Completed</p>
-                    <p className="text-2xl text-green-700">{completedOpening}/{openingTasks.length}</p>
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              <Card className="border-green-100">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Opening Completed</p>
+                      <p className="text-2xl text-green-700">{dashboardOpeningCompleted}/{allOpeningTasks.length}</p>
+                    </div>
+                    <CheckCircle2 className="w-8 h-8 text-green-600" />
                   </div>
-                  <CheckCircle2 className="w-8 h-8 text-green-600" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                </CardContent>
+              </Card>
+            </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <Card className="border-orange-100">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Closing Completed</p>
-                    <p className="text-2xl text-orange-700">{completedClosing}/{closingTasks.length}</p>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              <Card className="border-orange-100">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Closing Completed</p>
+                      <p className="text-2xl text-orange-700">{dashboardClosingCompleted}/{allClosingTasks.length}</p>
+                    </div>
+                    <Clock className="w-8 h-8 text-orange-600" />
                   </div>
-                  <Clock className="w-8 h-8 text-orange-600" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                </CardContent>
+              </Card>
+            </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <Card className="border-blue-100">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Kitchen Tasks</p>
-                    <p className="text-2xl text-blue-700">{mockTasks.filter(t => t.station === 'Kitchen').length}</p>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+              <Card className="border-blue-100">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Kitchen Tasks</p>
+                      <p className="text-2xl text-blue-700">{allKitchenTasks.length}</p>
+                    </div>
+                    <ChefHat className="w-8 h-8 text-blue-600" />
                   </div>
-                  <ChefHat className="w-8 h-8 text-blue-600" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                </CardContent>
+              </Card>
+            </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-            <Card className="border-amber-100">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Coffee Bar Tasks</p>
-                    <p className="text-2xl text-amber-700">{mockTasks.filter(t => t.station === 'Coffee Bar').length}</p>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+              <Card className="border-amber-100">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Coffee Bar Tasks</p>
+                      <p className="text-2xl text-amber-700">{allCoffeeBarTasks.length}</p>
+                    </div>
+                    <Coffee className="w-8 h-8 text-amber-600" />
                   </div>
-                  <Coffee className="w-8 h-8 text-amber-600" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        )}
 
         {/* Station Filter */}
         <div className="flex gap-2 mb-6">

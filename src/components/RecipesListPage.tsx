@@ -1,4 +1,4 @@
-import { Clock, Coffee, LogOut, Play, Search } from 'lucide-react';
+import { ArrowLeft, Clock, Coffee, Play, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Recipe, Screen } from '../App';
@@ -197,11 +197,11 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
             </div>
             <Button
               variant="ghost"
-              onClick={onLogout}
-              className="flex items-center gap-2 text-gray-700 hover:text-red-600 hover:bg-red-50"
+              onClick={onBack}
+              className="flex items-center gap-2 text-gray-700 hover:text-cyan-600 hover:bg-cyan-50"
             >
-              <LogOut className="w-5 h-5" />
-              <span className="hidden sm:inline">Logout</span>
+              <ArrowLeft className="w-5 h-5" />
+              <span className="hidden sm:inline">Back</span>
             </Button>
           </div>
         </div>
