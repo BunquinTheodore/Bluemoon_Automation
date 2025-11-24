@@ -1,82 +1,72 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Avatar, AvatarFallback } from './ui/avatar';
-import { ArrowLeft, LogOut, Users, Mail, Phone, Edit, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, LogOut, Users, Mail, Phone } from 'lucide-react';
 import { motion } from 'motion/react';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerEmployeesPageProps {
   onBack: () => void;
   onLogout: () => void;
 }
 
-const mockEmployees = [
-  {
-    id: '1',
-    name: 'Sarah Johnson',
-    status: 'full-time' as const,
-    email: 'sarah@bluemoon.com',
-    contactNumber: '555-0101',
-    position: 'Senior Barista',
-    joinDate: 'Jan 15, 2024',
-    birthday: 'Mar 15, 1995'
-  },
-  {
-    id: '2',
-    name: 'Mike Chen',
-    status: 'full-time' as const,
-    email: 'mike@bluemoon.com',
-    contactNumber: '555-0102',
-    position: 'Kitchen Lead',
-    joinDate: 'Mar 10, 2024',
-    birthday: 'Jul 22, 1998'
-  },
-  {
-    id: '3',
-    name: 'Emma Davis',
-    status: 'part-time' as const,
-    email: 'emma@bluemoon.com',
-    contactNumber: '555-0103',
-    position: 'Barista',
-    joinDate: 'Jun 20, 2024',
-    birthday: 'Nov 8, 2000'
-  },
-  {
-    id: '4',
-    name: 'James Wilson',
-    status: 'part-time' as const,
-    email: 'james@bluemoon.com',
-    contactNumber: '555-0104',
-    position: 'Prep Cook',
-    joinDate: 'Aug 5, 2024',
-    birthday: 'May 30, 1997'
-  },
-  {
-    id: '5',
-    name: 'Lisa Anderson',
-    status: 'full-time' as const,
-    email: 'lisa@bluemoon.com',
-    contactNumber: '555-0105',
-    position: 'Shift Supervisor',
-    joinDate: 'Feb 1, 2024',
-    birthday: 'Jan 12, 1993'
-  },
-  {
-    id: '6',
-    name: 'Tom Martinez',
-    status: 'part-time' as const,
-    email: 'tom@bluemoon.com',
-    contactNumber: '555-0106',
-    position: 'Barista',
-    joinDate: 'Sep 12, 2024',
-    birthday: 'Sep 5, 1999'
-  },
-];
+interface Employee {
+  id: string;
+  name: string;
+  email: string;
+  contactNumber: string;
+  position: string;
+  status: 'full-time' | 'part-time';
+  birthday: string;
+  joinDate: string;
+}
 
 export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps) {
-  const fullTimeCount = mockEmployees.filter(e => e.status === 'full-time').length;
-  const partTimeCount = mockEmployees.filter(e => e.status === 'part-time').length;
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch employees from Firestore
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
+      const loadedEmployees: Employee[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+
+          // Format join date
+          let joinDateStr = 'N/A';
+          if (data.joinDate) {
+            const joinDate = typeof data.joinDate === 'string'
+              ? new Date(data.joinDate)
+              : data.joinDate.toDate ? data.joinDate.toDate() : new Date();
+            joinDateStr = joinDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+
+          return {
+            id: docSnap.id,
+            name: data.name || '',
+            email: data.email || '',
+            contactNumber: data.contactNumber || '',
+            position: data.position || '',
+            status: (data.status === 'part-time' ? 'part-time' : 'full-time') as 'full-time' | 'part-time',
+            birthday: data.birthday || '',
+            joinDate: joinDateStr,
+          };
+        })
+        .filter((emp) => emp.isActive !== false);
+
+      setEmployees(loadedEmployees);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const fullTimeCount = employees.filter(e => e.status === 'full-time').length;
+  const partTimeCount = employees.filter(e => e.status === 'part-time').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -111,6 +101,13 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Loading State */}
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+          </div>
+        ) : (
+          <>
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -119,7 +116,7 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Total Employees</p>
-                    <p className="text-2xl text-indigo-700">{mockEmployees.length}</p>
+                    <p className="text-2xl text-indigo-700">{employees.length}</p>
                   </div>
                   <Users className="w-8 h-8 text-indigo-600" />
                 </div>
@@ -158,7 +155,7 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
 
         {/* Employee Cards - Mobile Friendly */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 md:hidden">
-          {mockEmployees.map((employee, index) => (
+          {employees.map((employee, index) => (
             <motion.div
               key={employee.id}
               initial={{ opacity: 0, y: 20 }}
@@ -193,15 +190,9 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                     <div className="text-gray-600">
                       Birthday: {employee.birthday}
                     </div>
-                  </div>
-                  <div className="flex gap-2 mt-4">
-                    <Button size="sm" variant="outline" className="flex-1">
-                      <Edit className="w-4 h-4 mr-1" />
-                      Edit
-                    </Button>
-                    <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="text-gray-600 text-sm">
+                      Joined: {employee.joinDate}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -212,16 +203,8 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
         {/* Employee Table - Desktop */}
         <Card className="hidden md:block border-cyan-100">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>All Employees</CardTitle>
-                <CardDescription>Complete staff directory</CardDescription>
-              </div>
-              <Button className="bg-cyan-600 hover:bg-cyan-700">
-                <Plus className="w-4 h-4 mr-2" />
-                Add Employee
-              </Button>
-            </div>
+            <CardTitle>All Employees</CardTitle>
+            <CardDescription>Complete staff directory (read-only)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="border rounded-lg overflow-hidden">
@@ -235,11 +218,10 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                     <TableHead>Email</TableHead>
                     <TableHead>Contact</TableHead>
                     <TableHead>Join Date</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mockEmployees.map((employee) => (
+                  {employees.map((employee) => (
                     <TableRow key={employee.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
@@ -261,16 +243,6 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                       <TableCell className="text-sm text-gray-600">{employee.email}</TableCell>
                       <TableCell className="text-sm text-gray-600">{employee.contactNumber}</TableCell>
                       <TableCell className="text-sm text-gray-500">{employee.joinDate}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="ghost">
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost">
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -278,12 +250,8 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
             </div>
           </CardContent>
         </Card>
-
-        {/* Add Employee Button - Mobile */}
-        <Button className="w-full md:hidden bg-cyan-600 hover:bg-cyan-700 mt-4">
-          <Plus className="w-4 h-4 mr-2" />
-          Add New Employee
-        </Button>
+          </>
+        )}
       </main>
     </div>
   );

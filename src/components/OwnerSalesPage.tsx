@@ -1,42 +1,101 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { ArrowLeft, LogOut, DollarSign } from 'lucide-react';
+import { Calendar } from './ui/calendar';
+import { ArrowLeft, LogOut, DollarSign, Calendar as CalendarIcon, TrendingUp } from 'lucide-react';
 import { motion } from 'motion/react';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerSalesPageProps {
   onBack: () => void;
   onLogout: () => void;
 }
 
-// Mock data for financial reports
-const mockFinancialData = {
+interface FinancialReport {
+  id: string;
+  reportId: string;
+  managerId: string;
+  managerName: string;
+  date: string;
   opening: {
-    cash: 5000,
-    digitalWallet: 3500,
-    bankAmount: 12000,
-  },
+    cash: number;
+    digitalWallet: number;
+    bank: number;
+    turnoverCash: number;
+    turnoverDigital: number;
+    turnoverBank: number;
+  };
   closing: {
-    cash: 8500,
-    digitalWallet: 6200,
-    bankAmount: 18500,
-  },
-};
-
-// Mock APEPO report data
-const mockApepoReport = {
-  audit: 'Daily audit completed. All registers balanced correctly. Minor discrepancy of ₱50 found in cash register, resolved.',
-  people: 'Sarah Johnson - Cashier',
-  equipment: 'All equipment functioning properly. Espresso machine cleaned and maintained. Refrigerator temperature at optimal levels.',
-  product: 'Coffee beans stock sufficient for 3 days. Milk products fresh, rotated properly. Syrup inventory adequate.',
-  others: 'Customer feedback positive. Peak hours 10am-12pm and 2pm-4pm. Recommended increasing staff during lunch rush.',
-  submittedBy: 'John Smith',
-  submittedDate: new Date('2025-10-23'),
-};
+    cash: number;
+    digitalWallet: number;
+    bank: number;
+    turnoverCash: number;
+    turnoverDigital: number;
+    turnoverBank: number;
+  };
+  managerFund: {
+    amount: number;
+  };
+  expenses: string;
+  status: string;
+  submittedAt: any;
+}
 
 export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
-  const openingTotal = mockFinancialData.opening.cash + mockFinancialData.opening.digitalWallet + mockFinancialData.opening.bankAmount;
-  const closingTotal = mockFinancialData.closing.cash + mockFinancialData.closing.digitalWallet + mockFinancialData.closing.bankAmount;
+  const [reports, setReports] = useState<FinancialReport[]>([]);
+  const [selectedReport, setSelectedReport] = useState<FinancialReport | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch financial reports from Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'financialReports'), orderBy('date', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedReports: FinancialReport[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          reportId: data.reportId || doc.id,
+          managerId: data.managerId || '',
+          managerName: data.managerName || '',
+          date: data.date || '',
+          opening: data.opening || { cash: 0, digitalWallet: 0, bank: 0, turnoverCash: 0, turnoverDigital: 0, turnoverBank: 0 },
+          closing: data.closing || { cash: 0, digitalWallet: 0, bank: 0, turnoverCash: 0, turnoverDigital: 0, turnoverBank: 0 },
+          managerFund: data.managerFund || { amount: 0 },
+          expenses: data.expenses || '',
+          status: data.status || 'pending',
+          submittedAt: data.submittedAt,
+        };
+      });
+
+      setReports(loadedReports);
+      if (loadedReports.length > 0 && !selectedReport) {
+        setSelectedReport(loadedReports[0]);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Filter reports by selected date
+  const filteredReports = selectedDate
+    ? reports.filter(r => r.date === selectedDate.toISOString().split('T')[0])
+    : reports;
+
+  // Calculate totals for selected report
+  const openingTotal = selectedReport
+    ? selectedReport.opening.cash + selectedReport.opening.digitalWallet + selectedReport.opening.bank
+    : 0;
+
+  const closingTotal = selectedReport
+    ? selectedReport.closing.cash + selectedReport.closing.digitalWallet + selectedReport.closing.bank
+    : 0;
+
+  const dailyEarnings = closingTotal - openingTotal;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -71,33 +130,147 @@ export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Financial Summary - Opening & Closing Side by Side */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Opening Shift */}
-          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-            <Card className="border-cyan-200 bg-gradient-to-br from-cyan-50 to-white">
-              <CardHeader>
-                <CardTitle className="text-cyan-800">Opening Shift</CardTitle>
-                <CardDescription>Morning financial summary</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-gray-600">Cash</span>
-                  <span className="text-lg text-cyan-700">₱{mockFinancialData.opening.cash.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-gray-600">Digital Wallet</span>
-                  <span className="text-lg text-cyan-700">₱{mockFinancialData.opening.digitalWallet.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-gray-600">Bank Amount</span>
-                  <span className="text-lg text-cyan-700">₱{mockFinancialData.opening.bankAmount.toLocaleString()}</span>
-                </div>
-                <div className="border-t-2 border-cyan-300 pt-3 mt-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-800">Total</span>
-                    <span className="text-2xl text-cyan-800">₱{openingTotal.toLocaleString()}</span>
-                  </div>
+        {/* Loading State */}
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+          </div>
+        ) : (
+          <>
+            {/* Date Filter and Reports List */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Date Selector */}
+              <Card className="lg:col-span-1">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarIcon className="w-5 h-5" />
+                    Filter by Date
+                  </CardTitle>
+                  <CardDescription>Select a date to filter reports</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    className="rounded-lg border shadow-sm"
+                  />
+                  {selectedDate && (
+                    <Button
+                      onClick={() => setSelectedDate(undefined)}
+                      variant="outline"
+                      className="w-full mt-4"
+                    >
+                      Clear Filter
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Reports List */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>Financial Reports</CardTitle>
+                  <CardDescription>
+                    {selectedDate
+                      ? `Reports for ${selectedDate.toLocaleDateString()}`
+                      : `All reports (${reports.length})`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {filteredReports.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No reports found for the selected date
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {filteredReports.map((report, index) => (
+                        <motion.div
+                          key={report.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          onClick={() => setSelectedReport(report)}
+                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                            selectedReport?.id === report.id
+                              ? 'border-cyan-500 bg-cyan-50'
+                              : 'border-gray-200 hover:border-cyan-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-semibold text-gray-900">
+                                {new Date(report.date).toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </p>
+                              <p className="text-sm text-gray-600">By {report.managerName}</p>
+                            </div>
+                            <Badge variant={report.status === 'approved' ? 'default' : 'outline'}>
+                              {report.status}
+                            </Badge>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Selected Report Details */}
+            {selectedReport && (
+              <>
+                {/* Daily Earnings Summary */}
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                  <Card className="border-green-200 bg-gradient-to-br from-green-50 to-white">
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600">Daily Earnings</p>
+                          <p className="text-3xl font-bold text-green-700">
+                            ₱{dailyEarnings.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {new Date(selectedReport.date).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <TrendingUp className="w-12 h-12 text-green-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
+                {/* Financial Summary - Opening & Closing Side by Side */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Opening Shift */}
+                  <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+                    <Card className="border-cyan-200 bg-gradient-to-br from-cyan-50 to-white">
+                      <CardHeader>
+                        <CardTitle className="text-cyan-800">Opening Shift</CardTitle>
+                        <CardDescription>Morning financial summary</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                          <span className="text-gray-600">Cash</span>
+                          <span className="text-lg text-cyan-700">₱{selectedReport.opening.cash.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                          <span className="text-gray-600">Digital Wallet</span>
+                          <span className="text-lg text-cyan-700">₱{selectedReport.opening.digitalWallet.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-white rounded-lg">
+                          <span className="text-gray-600">Bank Amount</span>
+                          <span className="text-lg text-cyan-700">₱{selectedReport.opening.bank.toLocaleString()}</span>
+                        </div>
+                        <div className="border-t-2 border-cyan-300 pt-3 mt-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-800 font-semibold">Total</span>
+                            <span className="text-2xl font-bold text-cyan-800">₱{openingTotal.toLocaleString()}</span>
+                          </div>
                 </div>
               </CardContent>
             </Card>
@@ -113,15 +286,15 @@ export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
               <CardContent className="space-y-4">
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
                   <span className="text-gray-600">Cash</span>
-                  <span className="text-lg text-orange-700">₱{mockFinancialData.closing.cash.toLocaleString()}</span>
+                  <span className="text-lg text-orange-700">₱{selectedReport.closing.cash.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
                   <span className="text-gray-600">Digital Wallet</span>
-                  <span className="text-lg text-orange-700">₱{mockFinancialData.closing.digitalWallet.toLocaleString()}</span>
+                  <span className="text-lg text-orange-700">₱{selectedReport.closing.digitalWallet.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
                   <span className="text-gray-600">Bank Amount</span>
-                  <span className="text-lg text-orange-700">₱{mockFinancialData.closing.bankAmount.toLocaleString()}</span>
+                  <span className="text-lg text-orange-700">₱{selectedReport.closing.bank.toLocaleString()}</span>
                 </div>
                 <div className="border-t-2 border-orange-300 pt-3 mt-3">
                   <div className="flex justify-between items-center">
@@ -134,65 +307,44 @@ export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
           </motion.div>
         </div>
 
-        {/* Daily Earnings Summary */}
+        {/* Manager Fund */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <Card className="border-green-200 bg-gradient-to-br from-green-50 to-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Daily Earnings</p>
-                  <p className="text-3xl text-green-700">
-                    ₱{(closingTotal - openingTotal).toLocaleString()}
-                  </p>
-                </div>
-                <DollarSign className="w-12 h-12 text-green-600 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* APEPO Report */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <Card className="border-cyan-100">
+          <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-white">
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>APEPO Report</CardTitle>
-                  <CardDescription>
-                    Submitted by {mockApepoReport.submittedBy} on {mockApepoReport.submittedDate.toLocaleDateString()}
-                  </CardDescription>
-                </div>
-                <Badge className="bg-cyan-600">Manager Report</Badge>
-              </div>
+              <CardTitle className="text-purple-800">Manager Fund</CardTitle>
+              <CardDescription>Allocated fund for manager operations</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="border-l-4 border-cyan-500 pl-4 py-2">
-                <h4 className="text-cyan-800 mb-2">A - Audit</h4>
-                <p className="text-gray-700">{mockApepoReport.audit}</p>
-              </div>
-
-              <div className="border-l-4 border-purple-500 pl-4 py-2">
-                <h4 className="text-purple-800 mb-2">P - People (Employees and Roles)</h4>
-                <p className="text-gray-700">{mockApepoReport.people}</p>
-              </div>
-
-              <div className="border-l-4 border-blue-500 pl-4 py-2">
-                <h4 className="text-blue-800 mb-2">E - Equipment Check</h4>
-                <p className="text-gray-700">{mockApepoReport.equipment}</p>
-              </div>
-
-              <div className="border-l-4 border-green-500 pl-4 py-2">
-                <h4 className="text-green-800 mb-2">P - Product</h4>
-                <p className="text-gray-700">{mockApepoReport.product}</p>
-              </div>
-
-              <div className="border-l-4 border-orange-500 pl-4 py-2">
-                <h4 className="text-orange-800 mb-2">O - Others</h4>
-                <p className="text-gray-700">{mockApepoReport.others}</p>
+            <CardContent>
+              <div className="flex items-center justify-between p-4 bg-white rounded-lg">
+                <span className="text-gray-700 font-medium">Fund Amount</span>
+                <span className="text-2xl font-bold text-purple-700">
+                  ₱{selectedReport.managerFund.amount.toLocaleString()}
+                </span>
               </div>
             </CardContent>
           </Card>
         </motion.div>
+
+        {/* Expenses */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+          <Card className="border-red-200 bg-gradient-to-br from-red-50 to-white">
+            <CardHeader>
+              <CardTitle className="text-red-800">Expenses</CardTitle>
+              <CardDescription>Daily operational expenses and notes</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="p-4 bg-white rounded-lg border border-red-100">
+                <p className="text-gray-700 whitespace-pre-wrap">
+                  {selectedReport.expenses || 'No expenses recorded for this date.'}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+              </>
+            )}
+          </>
+        )}
       </main>
     </div>
   );

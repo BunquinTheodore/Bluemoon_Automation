@@ -44,13 +44,17 @@ interface ManagerDashboardProps {
   onLogout: () => void;
 }
 
-// Mock Data
-const mockEmployees = [
-  { id: '1', name: 'Sarah Johnson', role: 'Cashier', status: 'full-time' as const, email: 'sarah@bluemoon.com', contactNumber: '555-0101', birthday: '1995-03-15' },
-  { id: '2', name: 'Mike Chen', role: 'Barista', status: 'full-time' as const, email: 'mike@bluemoon.com', contactNumber: '555-0102', birthday: '1998-07-22' },
-  { id: '3', name: 'Emma Davis', role: 'Kitchen', status: 'part-time' as const, email: 'emma@bluemoon.com', contactNumber: '555-0103', birthday: '2000-11-08' },
-  { id: '4', name: 'James Wilson', role: 'Cashier', status: 'part-time' as const, email: 'james@bluemoon.com', contactNumber: '555-0104', birthday: '1997-05-30' },
-];
+interface Employee {
+  id: string;
+  name: string;
+  email: string;
+  contactNumber: string;
+  position: string;
+  status: 'full-time' | 'part-time';
+  birthday: string;
+  joinDate: string;
+  isActive: boolean;
+}
 
 interface ManagerTask {
   id: string;
@@ -218,7 +222,43 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   const [payrollPayRate, setPayrollPayRate] = useState('');
 
   // Employee State
-  const [employees, setEmployees] = useState(mockEmployees);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [employeeFormData, setEmployeeFormData] = useState({
+    name: '',
+    email: '',
+    contactNumber: '',
+    position: '',
+    status: 'full-time' as 'full-time' | 'part-time',
+    birthday: '',
+  });
+
+  // Fetch employees from Firestore
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
+      const loadedEmployees: Employee[] = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            name: data.name || '',
+            email: data.email || '',
+            contactNumber: data.contactNumber || '',
+            position: data.position || '',
+            status: (data.status === 'part-time' ? 'part-time' : 'full-time') as 'full-time' | 'part-time',
+            birthday: data.birthday || '',
+            joinDate: data.joinDate || new Date().toISOString(),
+            isActive: data.isActive !== false,
+          };
+        })
+        .filter((emp) => emp.isActive);
+
+      setEmployees(loadedEmployees);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleToggleManagerTask = async (id: string) => {
     const task = managerTasks.find((t) => t.id === id);
@@ -294,7 +334,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     setApepoOthers('');
   };
 
-  const handleSubmitFinancialReport = () => {
+  const handleSubmitFinancialReport = async () => {
     if (
       !startingCash ||
       !startingDigital ||
@@ -313,8 +353,133 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       return;
     }
 
-    toast.success('Financial report submitted!');
-    setFinancialStatus('pending');
+    try {
+      const reportDate = selectedDate || new Date();
+      const dateString = reportDate.toISOString().split('T')[0];
+
+      const reportsCollection = collection(db, 'financialReports');
+      const reportDocRef = doc(reportsCollection);
+
+      await setDoc(reportDocRef, {
+        reportId: reportDocRef.id,
+        managerId: user.id,
+        managerName: user.name,
+        date: dateString,
+        timestamp: serverTimestamp(),
+
+        opening: {
+          cash: parseFloat(startingCash),
+          digitalWallet: parseFloat(startingDigital),
+          bank: parseFloat(startingBank),
+          turnoverCash: parseFloat(turnoverCash),
+          turnoverDigital: parseFloat(turnoverDigital),
+          turnoverBank: parseFloat(turnoverBank),
+        },
+
+        closing: {
+          cash: parseFloat(closingStartCash),
+          digitalWallet: parseFloat(closingStartDigital),
+          bank: parseFloat(closingStartBank),
+          turnoverCash: parseFloat(closingTurnoverCash),
+          turnoverDigital: parseFloat(closingTurnoverDigital),
+          turnoverBank: parseFloat(closingTurnoverBank),
+        },
+
+        managerFund: {
+          amount: managerFundAmount ? parseFloat(managerFundAmount) : 0,
+        },
+
+        expenses: expenses || '',
+        status: 'pending',
+        submittedAt: serverTimestamp(),
+      });
+
+      toast.success('Financial report submitted!');
+      setFinancialStatus('pending');
+
+      // Clear form fields
+      setStartingCash('');
+      setStartingDigital('');
+      setStartingBank('');
+      setTurnoverCash('');
+      setTurnoverDigital('');
+      setTurnoverBank('');
+      setClosingStartCash('');
+      setClosingStartDigital('');
+      setClosingStartBank('');
+      setClosingTurnoverCash('');
+      setClosingTurnoverDigital('');
+      setClosingTurnoverBank('');
+      setManagerFundAmount('');
+      setExpenses('');
+    } catch (error) {
+      console.error('Error submitting financial report:', error);
+      toast.error('Failed to submit financial report. Please try again.');
+    }
+  };
+
+  // Load financial report for selected date
+  const handleDateSelect = async (date: Date | undefined) => {
+    setSelectedDate(date);
+
+    if (!date) return;
+
+    try {
+      const dateString = date.toISOString().split('T')[0];
+      const reportsSnapshot = await getDocs(collection(db, 'financialReports'));
+
+      const report = reportsSnapshot.docs.find(doc => doc.data().date === dateString);
+
+      if (report) {
+        const data = report.data();
+
+        // Load opening shift data
+        setStartingCash(data.opening?.cash?.toString() || '');
+        setStartingDigital(data.opening?.digitalWallet?.toString() || '');
+        setStartingBank(data.opening?.bank?.toString() || '');
+        setTurnoverCash(data.opening?.turnoverCash?.toString() || '');
+        setTurnoverDigital(data.opening?.turnoverDigital?.toString() || '');
+        setTurnoverBank(data.opening?.turnoverBank?.toString() || '');
+
+        // Load closing shift data
+        setClosingStartCash(data.closing?.cash?.toString() || '');
+        setClosingStartDigital(data.closing?.digitalWallet?.toString() || '');
+        setClosingStartBank(data.closing?.bank?.toString() || '');
+        setClosingTurnoverCash(data.closing?.turnoverCash?.toString() || '');
+        setClosingTurnoverDigital(data.closing?.turnoverDigital?.toString() || '');
+        setClosingTurnoverBank(data.closing?.turnoverBank?.toString() || '');
+
+        // Load manager fund and expenses
+        setManagerFundAmount(data.managerFund?.amount?.toString() || '');
+        setExpenses(data.expenses || '');
+
+        setFinancialStatus(data.status || 'pending');
+
+        toast.success(`Loaded report for ${dateString}`);
+      } else {
+        // Clear form if no report for this date
+        setStartingCash('');
+        setStartingDigital('');
+        setStartingBank('');
+        setTurnoverCash('');
+        setTurnoverDigital('');
+        setTurnoverBank('');
+        setClosingStartCash('');
+        setClosingStartDigital('');
+        setClosingStartBank('');
+        setClosingTurnoverCash('');
+        setClosingTurnoverDigital('');
+        setClosingTurnoverBank('');
+        setManagerFundAmount('');
+        setExpenses('');
+        setFinancialStatus('pending');
+
+        toast.info(`No report found for ${dateString}`);
+      }
+    } catch (error) {
+      console.error('Error loading financial report:', error);
+      toast.error('Failed to load report');
+    }
   };
 
   const handleDeleteInventoryItem = (id: string) => {
@@ -367,20 +532,165 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     }
   };
 
-  const handleSubmitPayroll = () => {
+  // Employee CRUD Handlers
+  const handleAddEmployee = () => {
+    setEditingEmployee(null);
+    setEmployeeFormData({
+      name: '',
+      email: '',
+      contactNumber: '',
+      position: '',
+      status: 'full-time',
+      birthday: '',
+    });
+    setShowEmployeeForm(true);
+  };
+
+  const handleEditEmployee = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setEmployeeFormData({
+      name: employee.name,
+      email: employee.email,
+      contactNumber: employee.contactNumber,
+      position: employee.position,
+      status: employee.status,
+      birthday: employee.birthday,
+    });
+    setShowEmployeeForm(true);
+  };
+
+  const handleSaveEmployee = async () => {
+    if (!employeeFormData.name.trim() || !employeeFormData.email.trim()) {
+      toast.error('Please fill in name and email');
+      return;
+    }
+
+    try {
+      const employeesCollection = collection(db, 'employees');
+
+      if (editingEmployee) {
+        // Update existing employee
+        const employeeDocRef = doc(db, 'employees', editingEmployee.id);
+        await updateDoc(employeeDocRef, {
+          name: employeeFormData.name.trim(),
+          email: employeeFormData.email.trim(),
+          contactNumber: employeeFormData.contactNumber.trim(),
+          position: employeeFormData.position.trim(),
+          status: employeeFormData.status,
+          birthday: employeeFormData.birthday,
+          updatedAt: serverTimestamp(),
+        });
+        toast.success('Employee updated successfully!');
+      } else {
+        // Add new employee
+        const employeeDocRef = doc(employeesCollection);
+        await setDoc(employeeDocRef, {
+          employeeId: employeeDocRef.id,
+          name: employeeFormData.name.trim(),
+          email: employeeFormData.email.trim(),
+          contactNumber: employeeFormData.contactNumber.trim(),
+          position: employeeFormData.position.trim(),
+          status: employeeFormData.status,
+          birthday: employeeFormData.birthday,
+          joinDate: new Date().toISOString(),
+          isActive: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        toast.success('Employee added successfully!');
+      }
+
+      setShowEmployeeForm(false);
+      setEditingEmployee(null);
+    } catch (error) {
+      console.error('Error saving employee:', error);
+      toast.error('Failed to save employee. Please try again.');
+    }
+  };
+
+  const handleDeleteEmployee = async (employeeId: string) => {
+    if (!confirm('Are you sure you want to delete this employee?')) {
+      return;
+    }
+
+    try {
+      const employeeDocRef = doc(db, 'employees', employeeId);
+      await updateDoc(employeeDocRef, {
+        isActive: false,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success('Employee deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      toast.error('Failed to delete employee. Please try again.');
+    }
+  };
+
+  const handleCancelEmployeeForm = () => {
+    setShowEmployeeForm(false);
+    setEditingEmployee(null);
+  };
+
+  const handleSubmitPayroll = async () => {
     if (!payrollEmployeeName || !payrollDaysWorked || !payrollPayRate) {
       toast.error('Please fill in all payroll fields');
       return;
     }
 
-    const totalPay = parseInt(payrollDaysWorked) * parseFloat(payrollPayRate);
-    toast.success('Payroll entry submitted!', {
-      description: `${payrollEmployeeName} - Total: ₱${totalPay.toFixed(2)}`,
-    });
+    const daysWorked = parseInt(payrollDaysWorked);
+    const payRate = parseFloat(payrollPayRate);
 
-    setPayrollEmployeeName('');
-    setPayrollDaysWorked('');
-    setPayrollPayRate('');
+    if (isNaN(daysWorked) || isNaN(payRate) || daysWorked <= 0 || payRate <= 0) {
+      toast.error('Please enter valid numbers for days worked and pay rate');
+      return;
+    }
+
+    try {
+      // Find employee to get their status
+      const employee = employees.find(emp => emp.name === payrollEmployeeName);
+      const employeeStatus = employee?.status || 'full-time';
+      const employeeId = employee?.id || '';
+
+      const totalPay = daysWorked * payRate;
+
+      // Generate period string (e.g., "Nov 18-24, 2025")
+      const today = new Date();
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+      const periodString = `${startOfWeek.toLocaleDateString('en-US', { month: 'short' })} ${startOfWeek.getDate()}-${endOfWeek.getDate()}, ${endOfWeek.getFullYear()}`;
+
+      const payrollCollection = collection(db, 'payroll');
+      const payrollDocRef = doc(payrollCollection);
+
+      await setDoc(payrollDocRef, {
+        payrollId: payrollDocRef.id,
+        employeeId,
+        employeeName: payrollEmployeeName,
+        employeeStatus: employeeStatus,
+        managerId: user.id,
+        managerName: user.name,
+        daysWorked,
+        payRate,
+        totalPay,
+        period: periodString,
+        submittedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+
+      toast.success('Payroll entry submitted!', {
+        description: `${payrollEmployeeName} - Total: ₱${totalPay.toFixed(2)}`,
+      });
+
+      setPayrollEmployeeName('');
+      setPayrollDaysWorked('');
+      setPayrollPayRate('');
+    } catch (error) {
+      console.error('Error submitting payroll:', error);
+      toast.error('Failed to submit payroll. Please try again.');
+    }
   };
 
   const handleSubmitManagerFund = () => {
@@ -659,7 +969,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                 <Calendar
                   mode="single"
                   selected={selectedDate}
-                  onSelect={setSelectedDate}
+                  onSelect={handleDateSelect}
                   className="rounded-lg border-2 border-cyan-100 shadow-sm bg-white"
                 />
               </CardContent>
@@ -870,9 +1180,9 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       <SelectValue placeholder="Select employee and role" />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockEmployees.map((emp) => (
-                        <SelectItem key={emp.id} value={`${emp.name} - ${emp.role}`}>
-                          {emp.name} - {emp.role}
+                      {employees.map((emp) => (
+                        <SelectItem key={emp.id} value={`${emp.name} - ${emp.position}`}>
+                          {emp.name} - {emp.position}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1173,7 +1483,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
           </TabsContent>
 
           {/* Payroll Tab */}
-          <TabsContent value="payroll">
+          <TabsContent value="payroll" className="space-y-6">
             <Card className="border-cyan-100">
               <CardHeader>
                 <CardTitle>Payroll Entry</CardTitle>
@@ -1187,13 +1497,26 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       <SelectValue placeholder="Select employee" />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockEmployees.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.name}>
-                          {emp.name}
-                        </SelectItem>
-                      ))}
+                      {employees.length > 0 ? (
+                        employees
+                          .filter(emp => emp.isActive && emp.name && emp.name.trim().length > 0)
+                          .map((emp) => (
+                            <SelectItem key={emp.id} value={emp.name}>
+                              {emp.name}
+                            </SelectItem>
+                          ))
+                      ) : (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                          No employees available
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
+                  {employees.length === 0 && (
+                    <p className="text-sm text-amber-600 mt-2">
+                      Please add employees first in the Employees tab.
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1221,16 +1544,20 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                   </div>
                 </div>
 
-                {payrollDaysWorked && payrollPayRate && (
+                {payrollDaysWorked && payrollPayRate && !isNaN(parseInt(payrollDaysWorked)) && !isNaN(parseFloat(payrollPayRate)) && (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <p className="text-sm text-gray-600">Total Pay</p>
-                    <p className="text-2xl text-green-700">
+                    <p className="text-2xl font-bold text-green-700">
                       ₱{(parseInt(payrollDaysWorked) * parseFloat(payrollPayRate)).toFixed(2)}
                     </p>
                   </div>
                 )}
 
-                <Button onClick={handleSubmitPayroll} className="w-full bg-amber-600 hover:bg-amber-700">
+                <Button
+                  onClick={handleSubmitPayroll}
+                  className="w-full bg-amber-600 hover:bg-amber-700"
+                  disabled={employees.length === 0}
+                >
                   <Wallet className="w-4 h-4 mr-2" />
                   Submit Payroll Entry
                 </Button>
@@ -1251,7 +1578,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                     <TableHeader>
                       <TableRow>
                         <TableHead>Name</TableHead>
-                        <TableHead>Role</TableHead>
+                        <TableHead>Position</TableHead>
                         <TableHead>Birthday</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Email</TableHead>
@@ -1263,8 +1590,12 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       {employees.map((employee) => (
                         <TableRow key={employee.id}>
                           <TableCell>{employee.name}</TableCell>
-                          <TableCell>{employee.role}</TableCell>
-                          <TableCell>{new Date(employee.birthday).toLocaleDateString()}</TableCell>
+                          <TableCell>{employee.position}</TableCell>
+                          <TableCell>
+                            {employee.birthday && employee.birthday.trim().length > 0
+                              ? new Date(employee.birthday).toLocaleDateString()
+                              : 'N/A'}
+                          </TableCell>
                           <TableCell>
                             <Badge variant={employee.status === 'full-time' ? 'default' : 'outline'} className={employee.status === 'full-time' ? 'bg-cyan-600' : ''}>
                               {employee.status === 'full-time' ? 'Full-time' : 'Part-time'}
@@ -1274,10 +1605,10 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                           <TableCell className="text-sm text-gray-600">{employee.contactNumber}</TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
-                              <Button size="sm" variant="ghost">
+                              <Button size="sm" variant="ghost" onClick={() => handleEditEmployee(employee)}>
                                 <Edit className="w-4 h-4" />
                               </Button>
-                              <Button size="sm" variant="ghost">
+                              <Button size="sm" variant="ghost" onClick={() => handleDeleteEmployee(employee.id)}>
                                 <Trash2 className="w-4 h-4 text-red-500" />
                               </Button>
                             </div>
@@ -1288,7 +1619,89 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                   </Table>
                 </div>
 
-                <Button className="w-full mt-4 bg-indigo-600 hover:bg-indigo-700">
+                {/* Employee Form */}
+                {showEmployeeForm && (
+                  <Card className="mt-4 border-indigo-200">
+                    <CardHeader>
+                      <CardTitle>{editingEmployee ? 'Edit Employee' : 'Add New Employee'}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-name">Name *</Label>
+                          <Input
+                            id="emp-name"
+                            type="text"
+                            value={employeeFormData.name}
+                            onChange={(e) => setEmployeeFormData({ ...employeeFormData, name: e.target.value })}
+                            placeholder="Employee name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-email">Email *</Label>
+                          <Input
+                            id="emp-email"
+                            type="email"
+                            value={employeeFormData.email}
+                            onChange={(e) => setEmployeeFormData({ ...employeeFormData, email: e.target.value })}
+                            placeholder="employee@bluemoon.com"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-contact">Contact Number</Label>
+                          <Input
+                            id="emp-contact"
+                            type="text"
+                            value={employeeFormData.contactNumber}
+                            onChange={(e) => setEmployeeFormData({ ...employeeFormData, contactNumber: e.target.value })}
+                            placeholder="555-0123"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-position">Position</Label>
+                          <Input
+                            id="emp-position"
+                            type="text"
+                            value={employeeFormData.position}
+                            onChange={(e) => setEmployeeFormData({ ...employeeFormData, position: e.target.value })}
+                            placeholder="e.g., Barista, Cashier"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-status">Status</Label>
+                          <Select value={employeeFormData.status} onValueChange={(value) => setEmployeeFormData({ ...employeeFormData, status: value as 'full-time' | 'part-time' })}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="full-time">Full-time</SelectItem>
+                              <SelectItem value="part-time">Part-time</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="emp-birthday">Birthday</Label>
+                          <Input
+                            id="emp-birthday"
+                            type="date"
+                            value={employeeFormData.birthday}
+                            onChange={(e) => setEmployeeFormData({ ...employeeFormData, birthday: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={handleSaveEmployee} className="flex-1 bg-indigo-600 hover:bg-indigo-700">
+                          {editingEmployee ? 'Update Employee' : 'Add Employee'}
+                        </Button>
+                        <Button onClick={handleCancelEmployeeForm} variant="outline" className="flex-1">
+                          Cancel
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <Button onClick={handleAddEmployee} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-700">
                   <Plus className="w-4 h-4 mr-2" />
                   Add New Employee
                 </Button>

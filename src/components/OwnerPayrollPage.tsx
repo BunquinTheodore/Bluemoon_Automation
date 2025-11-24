@@ -1,77 +1,73 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { Badge } from './ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { ArrowLeft, LogOut, Receipt, DollarSign } from 'lucide-react';
 import { motion } from 'motion/react';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerPayrollPageProps {
   onBack: () => void;
   onLogout: () => void;
 }
 
-const mockPayrollEntries = [
-  {
-    id: '1',
-    employeeName: 'Sarah Johnson',
-    daysWorked: 6,
-    payRate: 600.00,
-    totalPay: 3600.00,
-    period: 'Oct 16-22, 2025',
-    status: 'Full-time'
-  },
-  {
-    id: '2',
-    employeeName: 'Mike Chen',
-    daysWorked: 5,
-    payRate: 600.00,
-    totalPay: 3000.00,
-    period: 'Oct 16-22, 2025',
-    status: 'Full-time'
-  },
-  {
-    id: '3',
-    employeeName: 'Emma Davis',
-    daysWorked: 4,
-    payRate: 500.00,
-    totalPay: 2000.00,
-    period: 'Oct 16-22, 2025',
-    status: 'Part-time'
-  },
-  {
-    id: '4',
-    employeeName: 'James Wilson',
-    daysWorked: 3,
-    payRate: 500.00,
-    totalPay: 1500.00,
-    period: 'Oct 16-22, 2025',
-    status: 'Part-time'
-  },
-  {
-    id: '5',
-    employeeName: 'Sarah Johnson',
-    daysWorked: 6,
-    payRate: 600.00,
-    totalPay: 3600.00,
-    period: 'Oct 9-15, 2025',
-    status: 'Full-time'
-  },
-  {
-    id: '6',
-    employeeName: 'Mike Chen',
-    daysWorked: 6,
-    payRate: 600.00,
-    totalPay: 3600.00,
-    period: 'Oct 9-15, 2025',
-    status: 'Full-time'
-  },
-];
+interface PayrollEntry {
+  id: string;
+  employeeName: string;
+  employeeStatus: string;
+  daysWorked: number;
+  payRate: number;
+  totalPay: number;
+  period: string;
+}
 
 export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
-  const totalPayroll = mockPayrollEntries.reduce((sum, entry) => sum + entry.totalPay, 0);
-  const currentWeekPayroll = mockPayrollEntries
-    .filter(e => e.period === 'Oct 16-22, 2025')
+  const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch payroll from Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'payroll'), orderBy('submittedAt', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedPayroll: PayrollEntry[] = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          employeeName: data.employeeName || '',
+          employeeStatus: data.employeeStatus || 'full-time',
+          daysWorked: data.daysWorked || 0,
+          payRate: data.payRate || 0,
+          totalPay: data.totalPay || 0,
+          period: data.period || 'N/A',
+        };
+      });
+
+      setPayrollEntries(loadedPayroll);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Calculate statistics
+  const totalPayroll = payrollEntries.reduce((sum, entry) => sum + entry.totalPay, 0);
+
+  // Get current week period string
+  const today = new Date();
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  const currentWeekPeriod = `${startOfWeek.toLocaleDateString('en-US', { month: 'short' })} ${startOfWeek.getDate()}-${endOfWeek.getDate()}, ${endOfWeek.getFullYear()}`;
+
+  const currentWeekPayroll = payrollEntries
+    .filter(e => e.period === currentWeekPeriod)
     .reduce((sum, entry) => sum + entry.totalPay, 0);
-  const totalEmployees = new Set(mockPayrollEntries.map(e => e.employeeName)).size;
+
+  const totalEmployees = new Set(payrollEntries.map(e => e.employeeName)).size;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -106,6 +102,13 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Loading State */}
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+          </div>
+        ) : (
+          <>
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -171,17 +174,13 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mockPayrollEntries.map((entry, index) => (
+                  {payrollEntries.map((entry, index) => (
                     <TableRow key={entry.id}>
                       <TableCell>{entry.employeeName}</TableCell>
                       <TableCell>
-                        <span className={`text-sm px-2 py-1 rounded ${
-                          entry.status === 'Full-time' 
-                            ? 'bg-cyan-100 text-cyan-700' 
-                            : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {entry.status}
-                        </span>
+                        <Badge variant={entry.employeeStatus === 'full-time' ? 'default' : 'outline'} className={entry.employeeStatus === 'full-time' ? 'bg-cyan-600' : ''}>
+                          {entry.employeeStatus === 'full-time' ? 'Full-time' : 'Part-time'}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-center">{entry.daysWorked}</TableCell>
                       <TableCell className="text-center">₱{entry.payRate.toLocaleString()}</TableCell>
@@ -196,6 +195,8 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
             </div>
           </CardContent>
         </Card>
+          </>
+        )}
       </main>
     </div>
   );
