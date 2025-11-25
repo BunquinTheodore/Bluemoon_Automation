@@ -56,7 +56,7 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
             joinDate: joinDateStr,
           };
         })
-        .filter((emp) => emp.isActive !== false);
+        .filter((emp) => emp.isActive !== false && emp.name.trim().length > 0);
 
       setEmployees(loadedEmployees);
       setLoading(false);

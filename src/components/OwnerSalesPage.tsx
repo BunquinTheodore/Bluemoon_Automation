@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Calendar } from './ui/calendar';
-import { ArrowLeft, LogOut, DollarSign, Calendar as CalendarIcon, TrendingUp } from 'lucide-react';
+import { ArrowLeft, LogOut, DollarSign, Calendar as CalendarIcon, TrendingUp, Camera } from 'lucide-react';
 import { motion } from 'motion/react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -26,6 +26,8 @@ interface FinancialReport {
     turnoverCash: number;
     turnoverDigital: number;
     turnoverBank: number;
+    imageUrl?: string;
+    imagePath?: string;
   };
   closing: {
     cash: number;
@@ -34,6 +36,8 @@ interface FinancialReport {
     turnoverCash: number;
     turnoverDigital: number;
     turnoverBank: number;
+    imageUrl?: string;
+    imagePath?: string;
   };
   managerFund: {
     amount: number;
@@ -341,6 +345,76 @@ export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
             </CardContent>
           </Card>
         </motion.div>
+
+        {/* Financial Report Photos */}
+        {selectedReport && (selectedReport.opening?.imageUrl || selectedReport.closing?.imageUrl) && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <Card className="border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+              <CardHeader>
+                <CardTitle className="text-indigo-800 flex items-center gap-2">
+                  <Camera className="w-5 h-5" />
+                  Financial Report Photos
+                </CardTitle>
+                <CardDescription>Visual proof of daily financial records</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Opening Shift Photo */}
+                  {selectedReport.opening?.imageUrl && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold text-cyan-800">Opening Shift</h4>
+                      <div className="relative group cursor-pointer">
+                        <img
+                          src={selectedReport.opening.imageUrl}
+                          alt="Opening shift financial report"
+                          className="w-full h-64 object-cover rounded-lg border-2 border-cyan-200
+                                   shadow-md hover:shadow-xl transition-shadow"
+                          onClick={() => window.open(selectedReport.opening.imageUrl, '_blank')}
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10
+                                      rounded-lg flex items-center justify-center transition-opacity">
+                          <span className="text-white opacity-0 group-hover:opacity-100
+                                       bg-cyan-600 px-4 py-2 rounded-full text-sm font-medium">
+                            Click to view full size
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Closing Shift Photo */}
+                  {selectedReport.closing?.imageUrl && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold text-orange-800">Closing Shift</h4>
+                      <div className="relative group cursor-pointer">
+                        <img
+                          src={selectedReport.closing.imageUrl}
+                          alt="Closing shift financial report"
+                          className="w-full h-64 object-cover rounded-lg border-2 border-orange-200
+                                   shadow-md hover:shadow-xl transition-shadow"
+                          onClick={() => window.open(selectedReport.closing.imageUrl, '_blank')}
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10
+                                      rounded-lg flex items-center justify-center transition-opacity">
+                          <span className="text-white opacity-0 group-hover:opacity-100
+                                       bg-orange-600 px-4 py-2 rounded-full text-sm font-medium">
+                            Click to view full size
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
               </>
             )}
           </>

@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -26,106 +28,61 @@ interface PhotoViewerPageProps {
   isOwner?: boolean;
 }
 
-// Mock photo submissions data
-const mockPhotoSubmissions: PhotoSubmission[] = [
-  {
-    id: '1',
-    employeeName: 'Sarah Johnson',
-    taskName: 'Turn on espresso machine',
-    station: 'coffee-bar',
-    category: 'opening',
-    timestamp: '8:30 AM',
-    date: '2025-11-01',
-    imageUrl: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800',
-    verified: true,
-  },
-  {
-    id: '2',
-    employeeName: 'Mike Chen',
-    taskName: 'Clean group heads and portafilters',
-    station: 'coffee-bar',
-    category: 'opening',
-    timestamp: '8:45 AM',
-    date: '2025-11-01',
-    imageUrl: 'https://images.unsplash.com/photo-1511920170033-f8396924c348?w=800',
-    verified: true,
-  },
-  {
-    id: '3',
-    employeeName: 'Emma Davis',
-    taskName: 'Turn on all equipment',
-    station: 'kitchen',
-    category: 'opening',
-    timestamp: '9:00 AM',
-    date: '2025-11-01',
-    imageUrl: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=800',
-    verified: true,
-  },
-  {
-    id: '4',
-    employeeName: 'James Wilson',
-    taskName: 'Sanitize tables and cutting boards',
-    station: 'kitchen',
-    category: 'opening',
-    timestamp: '9:15 AM',
-    date: '2025-11-01',
-    imageUrl: 'https://images.unsplash.com/photo-1556910096-6f5e72db6803?w=800',
-    verified: false,
-  },
-  {
-    id: '5',
-    employeeName: 'Sarah Johnson',
-    taskName: 'Backflush espresso machine',
-    station: 'coffee-bar',
-    category: 'closing',
-    timestamp: '6:30 PM',
-    date: '2025-10-31',
-    imageUrl: 'https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=800',
-    verified: true,
-  },
-  {
-    id: '6',
-    employeeName: 'Emma Davis',
-    taskName: 'Clean all cooking equipment',
-    station: 'kitchen',
-    category: 'closing',
-    timestamp: '6:45 PM',
-    date: '2025-10-31',
-    imageUrl: 'https://images.unsplash.com/photo-1574269910960-eafffb97cdb7?w=800',
-    verified: true,
-  },
-  {
-    id: '7',
-    employeeName: 'Mike Chen',
-    taskName: 'Wipe down espresso machine',
-    station: 'coffee-bar',
-    category: 'closing',
-    timestamp: '6:50 PM',
-    date: '2025-10-31',
-    imageUrl: 'https://images.unsplash.com/photo-1447933601403-0c6688de566e?w=800',
-    verified: true,
-  },
-  {
-    id: '8',
-    employeeName: 'James Wilson',
-    taskName: 'Sweep and mop kitchen floor',
-    station: 'kitchen',
-    category: 'closing',
-    timestamp: '7:00 PM',
-    date: '2025-10-31',
-    imageUrl: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=800',
-    verified: false,
-  },
-];
-
 export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPageProps) {
   const [selectedStation, setSelectedStation] = useState<'all' | 'kitchen' | 'coffee-bar'>('all');
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'opening' | 'closing'>('all');
+  const [photoSubmissions, setPhotoSubmissions] = useState<PhotoSubmission[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredPhotos = mockPhotoSubmissions.filter(photo => {
-    const stationMatch = selectedStation === 'all' || photo.station === selectedStation;
+  // Load real data from Firestore
+  useEffect(() => {
+    // Build query with station filter if not 'all'
+    let q;
+    if (selectedStation === 'all') {
+      q = query(
+        collection(db, 'taskSubmissions'),
+        orderBy('timestamp', 'desc')
+      );
+    } else {
+      q = query(
+        collection(db, 'taskSubmissions'),
+        where('station', '==', selectedStation),
+        orderBy('timestamp', 'desc')
+      );
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedPhotos: PhotoSubmission[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const timestamp = data.timestamp?.toDate?.();
+
+        return {
+          id: doc.id,
+          employeeName: data.employeeName || '',
+          taskName: data.taskName || '',
+          station: data.station,
+          category: data.category,
+          timestamp: timestamp ? timestamp.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit'
+          }) : '',
+          date: data.date || '',
+          imageUrl: data.photoUrl || '',
+          verified: data.verified || false,
+        };
+      });
+
+      setPhotoSubmissions(loadedPhotos);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [selectedStation]);
+
+  // Client-side category filtering
+  const filteredPhotos = photoSubmissions.filter(photo => {
     const categoryMatch = selectedCategory === 'all' || photo.category === selectedCategory;
-    return stationMatch && categoryMatch;
+    return categoryMatch;
   });
 
   return (
@@ -231,8 +188,13 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
         </div>
 
         {/* Photo Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredPhotos.map((photo, index) => (
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredPhotos.map((photo, index) => (
             <motion.div
               key={photo.id}
               initial={{ opacity: 0, y: 20 }}
@@ -245,6 +207,7 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
                     src={photo.imageUrl}
                     alt={photo.taskName}
                     className="w-full h-full object-cover"
+                    loading="lazy"
                   />
                   {photo.verified && (
                     <Badge className="absolute top-3 right-3 bg-green-600 shadow-lg">
@@ -296,10 +259,11 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
                 </CardContent>
               </Card>
             </motion.div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {filteredPhotos.length === 0 && (
+        {!loading && filteredPhotos.length === 0 && (
           <div className="text-center py-16">
             <Calendar className="w-16 h-16 mx-auto mb-4 text-gray-300" />
             <p className="text-gray-500 text-lg">No photo submissions found</p>

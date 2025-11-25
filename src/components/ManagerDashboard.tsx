@@ -1,5 +1,6 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
 import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { uploadImageToCloudinary } from '../lib/cloudinary';
 
 import {
   Calendar as CalendarIcon,
@@ -17,7 +18,8 @@ import {
   Trash2,
   Upload,
   Users,
-  Wallet
+  Wallet,
+  X as XIcon
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
@@ -252,7 +254,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
             isActive: data.isActive !== false,
           };
         })
-        .filter((emp) => emp.isActive);
+        .filter((emp) => emp.isActive && emp.name.trim().length > 0);
 
       setEmployees(loadedEmployees);
     });
@@ -335,6 +337,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   };
 
   const handleSubmitFinancialReport = async () => {
+    // Existing validation
     if (
       !startingCash ||
       !startingDigital ||
@@ -353,9 +356,32 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       return;
     }
 
+    // NEW: Validate required photos
+    if (!openingImage || !closingImage) {
+      toast.error('Please upload both opening and closing shift photos');
+      return;
+    }
+
     try {
       const reportDate = selectedDate || new Date();
       const dateString = reportDate.toISOString().split('T')[0];
+
+      // Show uploading toast
+      toast.loading('Uploading photos...', { id: 'upload-toast' });
+
+      // Upload opening image
+      const openingUpload = await uploadImageToCloudinary(
+        openingImage,
+        'financialReports/opening'
+      );
+
+      // Upload closing image
+      const closingUpload = await uploadImageToCloudinary(
+        closingImage,
+        'financialReports/closing'
+      );
+
+      toast.dismiss('upload-toast');
 
       const reportsCollection = collection(db, 'financialReports');
       const reportDocRef = doc(reportsCollection);
@@ -374,6 +400,8 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
           turnoverCash: parseFloat(turnoverCash),
           turnoverDigital: parseFloat(turnoverDigital),
           turnoverBank: parseFloat(turnoverBank),
+          imageUrl: openingUpload.secureUrl,
+          imagePath: openingUpload.publicId,
         },
 
         closing: {
@@ -383,6 +411,8 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
           turnoverCash: parseFloat(closingTurnoverCash),
           turnoverDigital: parseFloat(closingTurnoverDigital),
           turnoverBank: parseFloat(closingTurnoverBank),
+          imageUrl: closingUpload.secureUrl,
+          imagePath: closingUpload.publicId,
         },
 
         managerFund: {
@@ -394,10 +424,10 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
         submittedAt: serverTimestamp(),
       });
 
-      toast.success('Financial report submitted!');
+      toast.success('Financial report submitted with photos!');
       setFinancialStatus('pending');
 
-      // Clear form fields
+      // Clear all fields including images
       setStartingCash('');
       setStartingDigital('');
       setStartingBank('');
@@ -412,9 +442,12 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       setClosingTurnoverBank('');
       setManagerFundAmount('');
       setExpenses('');
+      setOpeningImage(null);
+      setClosingImage(null);
     } catch (error) {
+      toast.dismiss('upload-toast');
       console.error('Error submitting financial report:', error);
-      toast.error('Failed to submit financial report. Please try again.');
+      toast.error('Failed to upload photos. Please try again.');
     }
   };
 
@@ -1050,13 +1083,30 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       </div>
                       
                       <div className="space-y-2">
-                        <Label htmlFor="openingImage">Upload Opening Image</Label>
+                        <Label htmlFor="openingImage">Upload Opening Image *</Label>
                         <Input
                           id="openingImage"
                           type="file"
                           accept="image/*"
-                          onChange={(e) => setOpeningImage(e.target.files ? e.target.files[0] : null)}
+                          onChange={(e) => setOpeningImage(e.target.files?.[0] || null)}
                         />
+                        {openingImage && (
+                          <div className="mt-2 relative">
+                            <img
+                              src={URL.createObjectURL(openingImage)}
+                              alt="Opening shift preview"
+                              className="w-full h-32 object-cover rounded-lg border-2 border-cyan-300"
+                            />
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="absolute top-2 right-2"
+                              onClick={() => setOpeningImage(null)}
+                            >
+                              <XIcon className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1128,13 +1178,30 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       </div>
                       
                       <div className="space-y-2">
-                        <Label htmlFor="closingImage">Upload Closing Image</Label>
+                        <Label htmlFor="closingImage">Upload Closing Image *</Label>
                         <Input
                           id="closingImage"
                           type="file"
                           accept="image/*"
-                          onChange={(e) => setClosingImage(e.target.files ? e.target.files[0] : null)}
+                          onChange={(e) => setClosingImage(e.target.files?.[0] || null)}
                         />
+                        {closingImage && (
+                          <div className="mt-2 relative">
+                            <img
+                              src={URL.createObjectURL(closingImage)}
+                              alt="Closing shift preview"
+                              className="w-full h-32 object-cover rounded-lg border-2 border-orange-300"
+                            />
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="absolute top-2 right-2"
+                              onClick={() => setClosingImage(null)}
+                            >
+                              <XIcon className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

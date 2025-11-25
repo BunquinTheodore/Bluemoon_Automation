@@ -2,7 +2,10 @@ import { Camera, CheckCircle2, RotateCcw, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { collection, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Task, User } from '../App';
+import { db } from '../lib/firebase';
+import { uploadImageToCloudinary, validateImageFile } from '../lib/cloudinary';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
@@ -19,6 +22,8 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [confirmName, setConfirmName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fileObject, setFileObject] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCapture = () => {
@@ -30,6 +35,15 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file
+      const validation = validateImageFile(file);
+      if (!validation.valid) {
+        toast.error(validation.error);
+        return;
+      }
+
+      setFileObject(file);
+      setUploadError(''); // Clear previous errors
       const reader = new FileReader();
       reader.onloadend = () => {
         setCapturedImage(reader.result as string);
@@ -49,20 +63,70 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
       return;
     }
 
+    if (!fileObject) {
+      toast.error('No photo captured');
+      return;
+    }
+
     setIsSubmitting(true);
-    // Simulate upload delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    
-    toast.success('Task completed successfully!', {
-      description: `${task.name} verified by ${confirmName} at ${timeStr} on ${dateStr}`,
-    });
-    
-    setIsSubmitting(false);
-    onComplete();
+    setUploadError('');
+
+    try {
+      // 1. Upload photo to Cloudinary
+      const uploadResult = await uploadImageToCloudinary(
+        fileObject,
+        'taskSubmissions'
+      );
+
+      // 2. Create taskSubmission record in Firestore
+      const submissionsCollection = collection(db, 'taskSubmissions');
+      const submissionDocRef = doc(submissionsCollection);
+
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+
+      await setDoc(submissionDocRef, {
+        submissionId: submissionDocRef.id,
+        taskId: task.id,
+        taskName: task.name,
+        employeeId: employee.id,
+        employeeName: employee.name,
+        confirmedName: confirmName.trim(),
+        station: task.station,
+        category: task.category,
+        photoUrl: uploadResult.secureUrl,
+        photoPath: uploadResult.publicId,
+        qrCodeId: task.qrCodeId,
+        timestamp: serverTimestamp(),
+        date: dateStr,
+        verified: false,
+      });
+
+      // 3. Update task status to completed
+      const taskDocRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskDocRef, {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        completedBy: employee.id,
+      });
+
+      // 4. Success feedback
+      const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      toast.success('Task completed successfully!', {
+        description: `${task.name} verified by ${confirmName} at ${timeStr}`,
+      });
+
+      setIsSubmitting(false);
+
+      // 5. Navigate back after short delay for animation
+      setTimeout(() => onComplete(), 500);
+
+    } catch (error) {
+      console.error('Error submitting task:', error);
+      setUploadError(error instanceof Error ? error.message : 'Upload failed');
+      toast.error('Failed to upload photo. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -183,11 +247,25 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
                     </p>
                   </div>
 
+                  {uploadError && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-red-600 text-sm mb-2">{uploadError}</p>
+                      <Button
+                        onClick={handleSubmit}
+                        disabled={isSubmitting}
+                        className="w-full bg-red-600 hover:bg-red-700"
+                      >
+                        Retry Upload
+                      </Button>
+                    </div>
+                  )}
+
                   <div className="flex gap-3">
                     <Button
                       onClick={handleRetake}
                       variant="outline"
                       className="flex-1 border-gray-700 text-white hover:bg-gray-800"
+                      disabled={isSubmitting}
                     >
                       <RotateCcw className="w-4 h-4 mr-2" />
                       Retake
@@ -200,7 +278,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
                       {isSubmitting ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                          Submitting...
+                          Uploading...
                         </>
                       ) : (
                         <>

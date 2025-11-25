@@ -21,20 +21,23 @@ service cloud.firestore {
     function isEmployee() {
       return getUserRole() == 'employee';
     }
-    
+
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow write: if isOwner() || request.auth.uid == userId;
     }
-    
+
     match /tasks/{taskId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
+      allow create, delete: if isOwner() || isManager();
+      // Allow any authenticated user to mark tasks as completed
+      allow update: if isOwner() || isManager() ||
+        (isAuthenticated() && request.resource.data.status == 'completed');
     }
     
     match /taskSubmissions/{submissionId} {
       allow read: if isAuthenticated();
-      allow create: if isEmployee();
+      allow create: if isAuthenticated(); // Allow any authenticated user to create submissions
       allow update, delete: if isOwner() || isManager();
     }
     
