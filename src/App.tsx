@@ -19,6 +19,7 @@ import { OwnerPayrollPage } from './components/OwnerPayrollPage';
 import { OwnerEmployeesPage } from './components/OwnerEmployeesPage';
 import { OwnerManagerTasksPage } from './components/OwnerManagerTasksPage';
 import { PhotoViewerPage } from './components/PhotoViewerPage';
+import { FinancialReportPhotosPage } from './components/FinancialReportPhotosPage';
 import { Toaster } from './components/ui/sonner';
 
 export type UserRole = 'owner' | 'manager' | 'employee';
@@ -114,16 +115,16 @@ export interface Recipe {
   category: string;
 }
 
-export type Screen = 
-  | 'login' 
-  | 'owner-dashboard' 
+export type Screen =
+  | 'login'
+  | 'owner-dashboard'
   | 'manager-dashboard'
-  | 'employee-dashboard' 
-  | 'calendar' 
-  | 'task-detail' 
-  | 'qr-scan' 
-  | 'task-history' 
-  | 'notifications' 
+  | 'employee-dashboard'
+  | 'calendar'
+  | 'task-detail'
+  | 'qr-scan'
+  | 'task-history'
+  | 'notifications'
   | 'settings'
   | 'recipes-list'
   | 'recipe-detail'
@@ -140,7 +141,8 @@ export type Screen =
   | 'manager-requests'
   | 'manager-payroll'
   | 'manager-employees'
-  | 'photo-viewer';
+  | 'photo-viewer'
+  | 'financial-report-photos';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('login');
@@ -148,6 +150,7 @@ function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedTaskForScan, setSelectedTaskForScan] = useState<Task | null>(null);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [selectedFinancialReport, setSelectedFinancialReport] = useState<any>(null);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -166,9 +169,10 @@ function App() {
     setSelectedTask(null);
     setSelectedTaskForScan(null);
     setSelectedRecipe(null);
+    setSelectedFinancialReport(null);
   };
 
-  const navigateTo = (screen: Screen, task?: Task, recipe?: Recipe) => {
+  const navigateTo = (screen: Screen, task?: Task, recipe?: Recipe, financialReport?: any) => {
     if (screen === 'task-detail' && task) {
       setSelectedTask(task);
     }
@@ -177,6 +181,9 @@ function App() {
     }
     if (screen === 'recipe-detail' && recipe) {
       setSelectedRecipe(recipe);
+    }
+    if (screen === 'financial-report-photos' && financialReport) {
+      setSelectedFinancialReport(financialReport);
     }
     setCurrentScreen(screen);
   };
@@ -279,9 +286,10 @@ function App() {
         );
       case 'owner-sales':
         return (
-          <OwnerSalesPage 
+          <OwnerSalesPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
+            onNavigate={navigateTo}
           />
         );
       case 'owner-inventory':
@@ -321,9 +329,16 @@ function App() {
         );
       case 'photo-viewer':
         return (
-          <PhotoViewerPage 
+          <PhotoViewerPage
             onNavigate={navigateTo}
             isOwner={currentUser?.role === 'owner'}
+          />
+        );
+      case 'financial-report-photos':
+        return (
+          <FinancialReportPhotosPage
+            reportData={selectedFinancialReport!}
+            onBack={() => navigateTo('owner-sales')}
           />
         );
       default:

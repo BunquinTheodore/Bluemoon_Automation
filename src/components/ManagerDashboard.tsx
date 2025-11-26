@@ -1,5 +1,5 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
-import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { uploadImageToCloudinary } from '../lib/cloudinary';
 
 import {
@@ -177,39 +177,38 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   const [wastedInventoryImage, setWastedInventoryImage] = useState<File | null>(null);
 
   useEffect(() => {
-    const fetchInventory = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'inventory'));
-        if (!snapshot.empty) {
-          const items: InventoryItemExtended[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data() as any;
-            const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
-            const loose = typeof data.loose === 'number' ? data.loose : 0;
-            const unit = data.unit || '';
-            const lastUpdatedRaw = (data as any).lastUpdated;
-            const lastUpdated = lastUpdatedRaw && typeof lastUpdatedRaw.toDate === 'function'
-              ? lastUpdatedRaw.toDate()
-              : new Date();
-            const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
+    const unsubscribe = onSnapshot(
+      collection(db, 'inventory'),
+      (snapshot) => {
+        const items: InventoryItemExtended[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
+          const loose = typeof data.loose === 'number' ? data.loose : 0;
+          const unit = data.unit || '';
+          const lastUpdatedRaw = (data as any).lastUpdated;
+          const lastUpdated = lastUpdatedRaw && typeof lastUpdatedRaw.toDate === 'function'
+            ? lastUpdatedRaw.toDate()
+            : new Date();
+          const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
 
-            return {
-              id: data.inventoryId || docSnap.id,
-              productName: data.productName || '',
-              sealed,
-              loose,
-              unit,
-              lastUpdated,
-              station,
-            };
-          });
-          setInventory(items);
-        }
-      } catch (error) {
+          return {
+            id: data.inventoryId || docSnap.id,
+            productName: data.productName || '',
+            sealed,
+            loose,
+            unit,
+            lastUpdated,
+            station,
+          };
+        });
+        setInventory(items);
+      },
+      (error) => {
         console.error('Error loading inventory from Firestore', error);
       }
-    };
+    );
 
-    fetchInventory();
+    return () => unsubscribe();
   }, []);
 
   // Request State
@@ -358,7 +357,12 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
     // NEW: Validate required photos
     if (!openingImage || !closingImage) {
-      toast.error('Please upload both opening and closing shift photos');
+      toast.error('Please upload opening and closing shift photos');
+      return;
+    }
+
+    if (!managerFundImage) {
+      toast.error('Please upload manager fund photo');
       return;
     }
 
@@ -366,8 +370,21 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       const reportDate = selectedDate || new Date();
       const dateString = reportDate.toISOString().split('T')[0];
 
+      // Check for existing report on this date and delete it
+      const existingReportsSnapshot = await getDocs(
+        query(
+          collection(db, 'financialReports'),
+          where('date', '==', dateString)
+        )
+      );
+
+      // Delete existing report(s) for this date
+      for (const docSnap of existingReportsSnapshot.docs) {
+        await deleteDoc(doc(db, 'financialReports', docSnap.id));
+      }
+
       // Show uploading toast
-      toast.loading('Uploading photos...', { id: 'upload-toast' });
+      toast.loading('Uploading 3 photos...', { id: 'upload-toast' });
 
       // Upload opening image
       const openingUpload = await uploadImageToCloudinary(
@@ -379,6 +396,12 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       const closingUpload = await uploadImageToCloudinary(
         closingImage,
         'financialReports/closing'
+      );
+
+      // Upload manager fund image
+      const managerFundUpload = await uploadImageToCloudinary(
+        managerFundImage,
+        'financialReports/managerFund'
       );
 
       toast.dismiss('upload-toast');
@@ -417,6 +440,8 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
         managerFund: {
           amount: managerFundAmount ? parseFloat(managerFundAmount) : 0,
+          imageUrl: managerFundUpload.secureUrl,
+          imagePath: managerFundUpload.publicId,
         },
 
         expenses: expenses || '',
@@ -444,6 +469,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       setExpenses('');
       setOpeningImage(null);
       setClosingImage(null);
+      setManagerFundImage(null);
     } catch (error) {
       toast.dismiss('upload-toast');
       console.error('Error submitting financial report:', error);

@@ -1,5 +1,5 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
-import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import {
     Camera,
     CheckCircle2,
@@ -60,32 +60,32 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
   const [inventoryStation, setInventoryStation] = useState<'kitchen' | 'coffee-bar'>('kitchen');
 
   useEffect(() => {
-    const fetchInventory = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'inventory'));
-        if (!snapshot.empty) {
-          const items: InventoryItem[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data() as any;
-            const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
-            const loose = typeof data.loose === 'number' ? data.loose : 0;
-            const total = typeof data.total === 'number' ? data.total : sealed + loose;
-            return {
-              id: data.inventoryId || docSnap.id,
-              productName: data.productName || '',
-              unit: data.unit || '',
-              sealed,
-              loose,
-              delivered: total,
-              dateDelivered: data.dateDelivered || new Date().toISOString().split('T')[0],
-              station: data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
-            };
-          });
-          setInventory(items);
-        }
-      } catch (error) {
+    // Inventory real-time listener
+    const unsubscribeInventory = onSnapshot(
+      collection(db, 'inventory'),
+      (snapshot) => {
+        const items: InventoryItem[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
+          const loose = typeof data.loose === 'number' ? data.loose : 0;
+          const total = typeof data.total === 'number' ? data.total : sealed + loose;
+          return {
+            id: data.inventoryId || docSnap.id,
+            productName: data.productName || '',
+            unit: data.unit || '',
+            sealed,
+            loose,
+            delivered: total,
+            dateDelivered: data.dateDelivered || new Date().toISOString().split('T')[0],
+            station: data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
+          };
+        });
+        setInventory(items);
+      },
+      (error) => {
         console.error('Error loading inventory from Firestore', error);
       }
-    };
+    );
 
     const fetchTasks = async () => {
       try {
@@ -116,8 +116,12 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
       }
     };
 
-    fetchInventory();
     fetchTasks();
+
+    // Cleanup function
+    return () => {
+      unsubscribeInventory();
+    };
   }, []);
 
   const handleScanQR = (task: Task) => {
