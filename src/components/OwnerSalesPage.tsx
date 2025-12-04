@@ -4,9 +4,11 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Calendar } from './ui/calendar';
 import { ArrowLeft, LogOut, DollarSign, Calendar as CalendarIcon, TrendingUp, Camera, X } from 'lucide-react';
+import { GoogleSheetsExportButton } from './GoogleSheetsExportButton';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { toast } from 'sonner';
 
 interface OwnerSalesPageProps {
   onBack: () => void;
@@ -136,6 +138,9 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
   const closingTotal = closingNetCash + closingNetDigital + closingNetBank;
 
   const dailyEarnings = openingTotal + closingTotal;
+  const netSales = dailyEarnings * 0.88; // Daily Earnings - 12%
+
+  // Google Sheets export functionality is handled by GoogleSheetsExportButton component
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -157,14 +162,20 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                 </div>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              onClick={onLogout}
-              className="text-gray-700 hover:text-red-600 hover:bg-red-50"
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <GoogleSheetsExportButton
+                report={selectedReport}
+                disabled={!selectedReport}
+              />
+              <Button
+                variant="ghost"
+                onClick={onLogout}
+                className="text-gray-700 hover:text-red-600 hover:bg-red-50"
+                title="Logout"
+              >
+                <LogOut className="w-5 h-5" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -264,24 +275,45 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
             {/* Selected Report Details */}
             {selectedReport && (
               <>
-                {/* Daily Earnings Summary */}
+                {/* Daily Earnings and Net Sales Summary - Side by Side */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="border-green-200 bg-gradient-to-br from-green-50 to-white">
-                    <CardContent className="pt-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-gray-600">Daily Earnings</p>
-                          <p className="text-3xl font-bold text-green-700">
-                            ₱{dailyEarnings.toLocaleString()}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {new Date(selectedReport.date).toLocaleDateString()}
-                          </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Daily Earnings Card */}
+                    <Card className="border-green-200 bg-gradient-to-br from-green-50 to-white">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-gray-600">Daily Earnings</p>
+                            <p className="text-3xl font-bold text-green-700">
+                              ₱{dailyEarnings.toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {new Date(selectedReport.date).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <TrendingUp className="w-12 h-12 text-green-600" />
                         </div>
-                        <TrendingUp className="w-12 h-12 text-green-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+
+                    {/* Net Sales Card */}
+                    <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-gray-600">Net Sales</p>
+                            <p className="text-3xl font-bold text-blue-700">
+                              ₱{netSales.toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Daily Earnings - 12%
+                            </p>
+                          </div>
+                          <TrendingUp className="w-12 h-12 text-blue-600" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </motion.div>
 
                 {/* Financial Summary - Opening & Closing Side by Side */}
