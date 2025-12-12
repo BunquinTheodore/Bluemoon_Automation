@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { Calendar } from './ui/calendar';
 import { Input } from './ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Checkbox } from './ui/checkbox';
-import { ArrowLeft, LogOut, Package, AlertTriangle, Trash2, Coffee, ChefHat } from 'lucide-react';
+import { ArrowLeft, LogOut, Package, AlertTriangle, Trash2, Coffee, ChefHat, Calendar as CalendarIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
-import { collection, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, deleteDoc, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 interface OwnerInventoryPageProps {
@@ -31,6 +32,20 @@ interface InventoryItem {
   station: 'kitchen' | 'coffee-bar';
 }
 
+interface InventorySubmission {
+  historyId: string;
+  productName: string;
+  unit: string;
+  station: 'kitchen' | 'coffee-bar';
+  sealed: number;
+  loose: number;
+  delivered: number;    // sealed + loose
+  submittedBy: string;
+  submittedByName: string;
+  timestamp: Date;
+  notes: string;
+}
+
 // Helper function to calculate inventory status based on total quantity
 const calculateStatus = (total: number): 'good' | 'low' | 'critical' => {
   if (total < 5) return 'critical';
@@ -43,6 +58,9 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [dailySubmissions, setDailySubmissions] = useState<InventorySubmission[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
 
   // Fetch inventory from Firestore
   useEffect(() => {
@@ -171,6 +189,63 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
     }
   };
 
+  const fetchSubmissionsForDate = async (date: Date) => {
+    setLoadingSubmissions(true);
+    try {
+      // Define date range for the selected day
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Fetch all inventory items
+      const inventorySnapshot = await getDocs(collection(db, 'inventory'));
+      const allSubmissions: InventorySubmission[] = [];
+
+      // For each inventory item, query its history subcollection for the selected date
+      for (const inventoryDoc of inventorySnapshot.docs) {
+        const inventoryData = inventoryDoc.data();
+        const historyRef = collection(db, 'inventory', inventoryDoc.id, 'history');
+
+        const historyQuery = query(
+          historyRef,
+          where('timestamp', '>=', startOfDay),
+          where('timestamp', '<=', endOfDay),
+          orderBy('timestamp', 'desc')
+        );
+
+        const historySnapshot = await getDocs(historyQuery);
+
+        historySnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          allSubmissions.push({
+            historyId: doc.id,
+            productName: inventoryData.productName || '[Deleted Product]',
+            unit: inventoryData.unit || '',
+            station: inventoryData.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
+            sealed: data.sealed || 0,
+            loose: data.loose || 0,
+            delivered: data.total || 0,
+            submittedBy: data.changedBy || '',
+            submittedByName: data.changedByName || 'Unknown',
+            timestamp: data.timestamp?.toDate() || new Date(),
+            notes: data.notes || ''
+          });
+        });
+      }
+
+      // Sort by timestamp (most recent first)
+      allSubmissions.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setDailySubmissions(allSubmissions);
+    } catch (error) {
+      console.error('Error fetching submissions:', error);
+      toast.error('Failed to load inventory submissions');
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
       {/* Header */}
@@ -211,6 +286,202 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
           </div>
         ) : (
           <>
+        {/* Date Filter and History Display */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          {/* Date Selector Card */}
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5" />
+                Filter by Date
+              </CardTitle>
+              <CardDescription>View inventory changes history</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={(date) => {
+                  setSelectedDate(date);
+                  if (date) {
+                    fetchSubmissionsForDate(date);
+                  } else {
+                    setDailySubmissions([]);
+                  }
+                }}
+                className="rounded-lg border shadow-sm"
+              />
+              {selectedDate && (
+                <Button
+                  onClick={() => {
+                    setSelectedDate(undefined);
+                    setDailySubmissions([]);
+                  }}
+                  variant="outline"
+                  className="w-full mt-4"
+                >
+                  Clear Filter
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Submissions Display Card */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Inventory Submissions</CardTitle>
+              <CardDescription>
+                {selectedDate
+                  ? `Submissions for ${selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} - ${dailySubmissions.length} submission${dailySubmissions.length !== 1 ? 's' : ''}`
+                  : 'Select a date to view inventory submissions'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingSubmissions ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+              ) : !selectedDate ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Package className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                  <p className="font-medium">Select a date from the calendar to view</p>
+                  <p className="text-sm mt-1">inventory submissions for that day</p>
+                </div>
+              ) : dailySubmissions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Package className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                  <p className="font-medium">No inventory submissions for this date</p>
+                </div>
+              ) : (
+                <Tabs defaultValue="kitchen" className="space-y-4">
+                  <TabsList className="grid w-full grid-cols-2 bg-blue-100">
+                    <TabsTrigger value="kitchen" className="data-[state=active]:bg-white data-[state=active]:text-blue-700">
+                      <ChefHat className="w-4 h-4 mr-2" />
+                      Kitchen ({dailySubmissions.filter(s => s.station === 'kitchen').length})
+                    </TabsTrigger>
+                    <TabsTrigger value="coffee-bar" className="data-[state=active]:bg-white data-[state=active]:text-blue-700">
+                      <Coffee className="w-4 h-4 mr-2" />
+                      Coffee Bar ({dailySubmissions.filter(s => s.station === 'coffee-bar').length})
+                    </TabsTrigger>
+                  </TabsList>
+
+                  {/* Kitchen Submissions */}
+                  <TabsContent value="kitchen">
+                    {dailySubmissions.filter(s => s.station === 'kitchen').length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <p>No kitchen submissions for this date</p>
+                      </div>
+                    ) : (
+                      <div className="border rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Product Name</TableHead>
+                              <TableHead>Unit</TableHead>
+                              <TableHead className="text-center">Sealed</TableHead>
+                              <TableHead className="text-center">Loose</TableHead>
+                              <TableHead className="text-center">Delivered</TableHead>
+                              <TableHead>Submitted By</TableHead>
+                              <TableHead>Time</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {dailySubmissions
+                              .filter(s => s.station === 'kitchen')
+                              .map((submission, index) => (
+                                <motion.tr
+                                  key={submission.historyId}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: index * 0.03 }}
+                                  className="border-b"
+                                >
+                                  <TableCell>{submission.productName}</TableCell>
+                                  <TableCell>{submission.unit}</TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="text-gray-700">{submission.sealed}</span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="text-gray-700">{submission.loose}</span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="font-semibold text-gray-900">{submission.delivered}</span>
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-600">
+                                    {submission.submittedByName}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-500">
+                                    {submission.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  </TableCell>
+                                </motion.tr>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* Coffee Bar Submissions */}
+                  <TabsContent value="coffee-bar">
+                    {dailySubmissions.filter(s => s.station === 'coffee-bar').length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <p>No coffee bar submissions for this date</p>
+                      </div>
+                    ) : (
+                      <div className="border rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Product Name</TableHead>
+                              <TableHead>Unit</TableHead>
+                              <TableHead className="text-center">Sealed</TableHead>
+                              <TableHead className="text-center">Loose</TableHead>
+                              <TableHead className="text-center">Delivered</TableHead>
+                              <TableHead>Submitted By</TableHead>
+                              <TableHead>Time</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {dailySubmissions
+                              .filter(s => s.station === 'coffee-bar')
+                              .map((submission, index) => (
+                                <motion.tr
+                                  key={submission.historyId}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: index * 0.03 }}
+                                  className="border-b"
+                                >
+                                  <TableCell>{submission.productName}</TableCell>
+                                  <TableCell>{submission.unit}</TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="text-gray-700">{submission.sealed}</span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="text-gray-700">{submission.loose}</span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <span className="font-semibold text-gray-900">{submission.delivered}</span>
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-600">
+                                    {submission.submittedByName}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-500">
+                                    {submission.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  </TableCell>
+                                </motion.tr>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Alert Cards */}
         {(criticalItems.length > 0 || lowItems.length > 0) && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
