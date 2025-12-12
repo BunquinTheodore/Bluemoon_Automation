@@ -1,0 +1,112 @@
+mutation CreateDemoData @auth(level: PUBLIC, insecureReason: "This mutation is used to populate the database with seed data.") @transaction {
+  cafe_insertMany(data: [
+    {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      address: "123 Main St",
+      name: "Cafe 1",
+      phoneNumber: "555-1234"
+    },
+    {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      address: "456 Elm St",
+      name: "Cafe 2",
+      phoneNumber: "555-5678"
+    }
+  ])
+  customer_insertMany(data: [
+    {
+      id: "650e8400-e29b-41d4-a716-446655440000",
+      displayName: "Customer 1",
+      email: "customer1@example.com"
+    },
+    {
+      id: "650e8400-e29b-41d4-a716-446655440001",
+      displayName: "Customer 2",
+      email: "customer2@example.com"
+    }
+  ])
+  ingredient_insertMany(data: [
+    {
+      id: "750e8400-e29b-41d4-a716-446655440000",
+      cafeId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "Coffee Beans",
+      currentStock: 100,
+      unitOfMeasure: "lbs"
+    },
+    {
+      id: "750e8400-e29b-41d4-a716-446655440001",
+      cafeId: "550e8400-e29b-41d4-a716-446655440001",
+      name: "Milk",
+      currentStock: 50,
+      unitOfMeasure: "gallons"
+    }
+  ])
+  loyaltyReward_insertMany(data: [
+    {
+      id: "850e8400-e29b-41d4-a716-446655440000",
+      cafeId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "Free Coffee",
+      description: "Get a free coffee after 10 purchases",
+      pointsRequired: 100
+    },
+    {
+      id: "850e8400-e29b-41d4-a716-446655440001",
+      cafeId: "550e8400-e29b-41d4-a716-446655440001",
+      name: "Discount",
+      description: "Get 10% off your next purchase",
+      pointsRequired: 50
+    }
+  ])
+  menuItem_insertMany(data: [
+    {
+      id: "950e8400-e29b-41d4-a716-446655440000",
+      cafeId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "Latte",
+      category: "Coffee",
+      price: 3.50,
+      isAvailable: true
+    },
+    {
+      id: "950e8400-e29b-41d4-a716-446655440001",
+      cafeId: "550e8400-e29b-41d4-a716-446655440001",
+      name: "Cappuccino",
+      category: "Coffee",
+      price: 4.00,
+      isAvailable: true
+    }
+  ])
+   order_insertMany(data: [
+    {
+      id: "b50e8400-e29b-41d4-a716-446655440000",
+      cafeId: "550e8400-e29b-41d4-a716-446655440000",
+      customerId: "650e8400-e29b-41d4-a716-446655440000",
+      orderDate: "2024-04-03T10:00:00Z",
+      status: "completed",
+      totalAmount: 13.50
+    },
+    {
+      id: "b50e8400-e29b-41d4-a716-446655440001",
+      cafeId: "550e8400-e29b-41d4-a716-446655440001",
+      customerId: "650e8400-e29b-41d4-a716-446655440001",
+      orderDate: "2024-04-03T11:00:00Z",
+      status: "completed",
+      totalAmount: 8.00
+    }
+  ])
+   orderItem_insertMany(data: [
+    {
+      id: "c50e8400-e29b-41d4-a716-446655440000",
+      menuItemId: "950e8400-e29b-41d4-a716-446655440000",
+      orderId: "b50e8400-e29b-41d4-a716-446655440000",
+      quantity: 2,
+      unitPrice: 3.50
+    },
+    {
+      id: "c50e8400-e29b-41d4-a716-446655440001",
+      menuItemId: "950e8400-e29b-41d4-a716-446655440001",
+      orderId: "b50e8400-e29b-41d4-a716-446655440001",
+      quantity: 2,
+      unitPrice: 4.00
+    }
+  ])
+}

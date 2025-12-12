@@ -1,0 +1,60 @@
+type Cafe @table {
+  name: String!
+  address: String!
+  phoneNumber: String!
+  email: String
+  website: String
+  openingHours: String
+}
+
+type MenuItem @table {
+  cafe: Cafe
+  name: String!
+  price: Float!
+  category: String!
+  description: String
+  imageUrl: String
+  isAvailable: Boolean
+}
+
+type Ingredient @table {
+  cafe: Cafe
+  name: String!
+  unitOfMeasure: String!
+  currentStock: Int!
+  lowStockThreshold: Int
+}
+
+type Order @table {
+  cafe: Cafe
+  customer: Customer
+  orderDate: Timestamp!
+  totalAmount: Float!
+  status: String!
+  specialInstructions: String
+  orderType: String
+}
+
+type OrderItem @table {
+  order: Order
+  menuItem: MenuItem
+  quantity: Int!
+  unitPrice: Float!
+  customizationNotes: String
+}
+
+type Customer @table {
+  displayName: String!
+  email: String!
+  phoneNumber: String
+  loyaltyPoints: Int
+}
+
+type LoyaltyReward @table {
+  cafe: Cafe
+  name: String!
+  pointsRequired: Int!
+  description: String!
+  imageUrl: String
+  expiryDate: Date
+}

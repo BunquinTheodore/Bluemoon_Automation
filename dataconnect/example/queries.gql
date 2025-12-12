@@ -1,0 +1,42 @@
+mutation CreateLoyaltyReward(
+  $cafeId: UUID!
+  $description: String!
+  $name: String!
+  $pointsRequired: Int!
+) @auth(level: USER) {
+  loyaltyReward_insert(
+    data: {
+      cafeId: $cafeId
+      description: $description
+      name: $name
+      pointsRequired: $pointsRequired
+    }
+  )
+}
+
+query ListMenuItemsByCategory($category: String!) @auth(level: PUBLIC, insecureReason: "This operation is safe to expose to the public") {
+  menuItems(where: { category: { eq: $category } }) {
+    id
+    name
+    description
+    price
+    imageUrl
+    isAvailable
+  }
+}
+
+mutation UpdateIngredientStock($id: UUID!, $currentStock: Int!) @auth(level: USER) {
+  ingredient_update(key: { id: $id }, data: { currentStock: $currentStock })
+}
+
+query GetCafeDetails($cafeId: UUID!) @auth(level: PUBLIC, insecureReason: "This operation is safe to expose to the public") {
+  cafe(id: $cafeId) {
+    id
+    name
+    address
+    phoneNumber
+    openingHours
+    website
+    email
+  }
+}
