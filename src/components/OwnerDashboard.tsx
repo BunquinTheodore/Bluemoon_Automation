@@ -11,7 +11,8 @@ import {
   Users,
   LogOut,
   UserCog,
-  Camera
+  Camera,
+  Coffee
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
@@ -98,6 +99,15 @@ export function OwnerDashboard({ user, onNavigate, onLogout }: OwnerDashboardPro
                 title="View All Photo Submissions"
               >
                 <Camera className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('owner-products')}
+                className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                title="Product Management"
+              >
+                <Coffee className="w-5 h-5" />
               </Button>
               <Button
                 variant="ghost"

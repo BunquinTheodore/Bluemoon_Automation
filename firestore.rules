@@ -103,5 +103,20 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isOwner();
     }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+
+      match /ingredients/{ingredientId} {
+        allow read: if isAuthenticated();
+        allow write: if isOwner();
+      }
+    }
+
+    match /ingredients/{ingredientId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
   }
 }

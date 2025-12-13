@@ -18,6 +18,7 @@ import { OwnerRequestsPage } from './components/OwnerRequestsPage';
 import { OwnerPayrollPage } from './components/OwnerPayrollPage';
 import { OwnerEmployeesPage } from './components/OwnerEmployeesPage';
 import { OwnerManagerTasksPage } from './components/OwnerManagerTasksPage';
+import { OwnerProductsPage } from './components/OwnerProductsPage';
 import { PhotoViewerPage } from './components/PhotoViewerPage';
 import { FinancialReportPhotosPage } from './components/FinancialReportPhotosPage';
 import { Toaster } from './components/ui/sonner';
@@ -115,6 +116,31 @@ export interface Recipe {
   category: string;
 }
 
+export interface Ingredient {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  createdAt: Date;
+  lastUpdated: Date;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  category: string;
+  createdAt: Date;
+  lastUpdated: Date;
+}
+
+export interface ProductIngredient {
+  id: string;
+  ingredientId: string;
+  ingredientName: string;
+  quantity: number;
+  unit: string;
+}
+
 export type Screen =
   | 'login'
   | 'owner-dashboard'
@@ -135,6 +161,7 @@ export type Screen =
   | 'owner-payroll'
   | 'owner-employees'
   | 'owner-manager-tasks'
+  | 'owner-products'
   | 'manager-task-management'
   | 'manager-reports'
   | 'manager-inventory'
@@ -322,7 +349,14 @@ function App() {
         );
       case 'owner-manager-tasks':
         return (
-          <OwnerManagerTasksPage 
+          <OwnerManagerTasksPage
+            onBack={() => navigateTo('owner-dashboard')}
+            onLogout={handleLogout}
+          />
+        );
+      case 'owner-products':
+        return (
+          <OwnerProductsPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
