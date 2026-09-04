@@ -1,72 +1,122 @@
-﻿# Bluemoon Business Management App
+# Bluemoon Business Management App
 
 <div align="center">
   <img src="src/assets/3f9d5e2624d6f76604e00bccf7f947f633651625.png" alt="Bluemoon Logo" height="100" />
-  <br />
-  <p>A comprehensive business management solution designed to streamline operations, enhance communication, and provide real-time insights.</p>
-  <p>
-    <a href="https://www.figma.com/design/w7rherjoaYQEbDtuoZz9uU/Bluemoon-Business-Management-App">View Design on Figma</a>
-  </p>
+  <p>A role-based business management app for Bluemoon: tasks, inventory, sales, payroll, requests and reporting in one place.</p>
+  <p><a href="https://www.figma.com/design/w7rherjoaYQEbDtuoZz9uU/Bluemoon-Business-Management-App">Figma design</a></p>
 </div>
 
-##  Problem
+## Overview
 
-Managing a business with multiple distinct roles (Owners, Managers, Employees) often leads to fragmented communication, manual tracking errors, and a lack of real-time visibility into daily operations. Traditional methods of handling tasks, inventory, payroll, and sales separately can result in inefficiencies and lost data.
+Bluemoon centralizes daily operations for a multi-branch business. Users sign in with Firebase Authentication and are routed to a dashboard based on their role stored in Firestore (`users/{uid}.role`).
 
-##  Purpose
+| Role | What they see |
+|------|---------------|
+| **Owner** | Full oversight: analytics, store, products, inventory, sales, payroll, employees, requests, cup inventory, reports and exports |
+| **Manager** | Task assignment and tracking, team coordination, cup inventory review, report emails |
+| **Employee** | Assigned tasks, task history, QR check-in, cup inventory submission |
 
-The **Bluemoon Business Management App** is built to centralize all business operations into a single, intuitive platform. It empowers:
-- **Owners** with high-level oversight and detailed reporting.
-- **Managers** with effective tools for team coordination and task assignment.
-- **Employees** with clear guidance on daily responsibilities and history tracking.
+## Features
 
-##  Features
+- **Task management** - assign, schedule (calendar view), track and complete tasks with photo proof
+- **Products and recipes** - product catalogue with ingredients and recipe details
+- **Inventory control** - stock levels tied to recipes
+- **Cup Inventory** - per-branch daily cup counts (opening, sold, expected vs actual ending) with automatic discrepancy detection. Role-specific pages: `OwnerCupInventoryPage`, `ManagerCupInventoryPage`, `TeamCupInventoryPage` (`src/components/*CupInventoryPage.tsx`, logic in `src/lib/cupInventory.ts`)
+- **Sales and financial reports** - daily sales, report photos, automated and on-demand email reports (Postmark, via Cloud Functions)
+- **Google Sheets export** - one-click export of financial reports to a Google Sheet using Google Identity Services OAuth (`src/components/GoogleSheetsExportButton.tsx`, `src/lib/googleSheets.ts`)
+- **Payroll, employees and requests** - staff profiles, payroll views, and approve/reject request workflow
+- **Attendance** - QR code scanning for check-ins
+- **Photos** - task/report photos uploaded to Cloudinary (unsigned preset); photos older than 24 hours are cleaned up nightly
+- **Notifications** - in-app alerts for tasks and updates
+- **Modern UI** - Tailwind CSS + Radix/shadcn components, responsive layout
 
-###  Owner Dashboard
-- **Comprehensive Overview**: Visual analytics for business performance.
-- **Store Management**: Manage store details and settings.
-- **Inventory Control**: Real-time tracking of stock levels and recipes.
-- **Financials**: Monitor sales, payroll, and expenses.
-- **Employee Oversight**: Manage staff profiles and roles.
-- **Request Handling**: Review and approve/reject requests from staff.
+## Tech stack
 
-###  Manager Dashboard
-- **Task Management**: Assign tasks to employees and track completion.
-- **Team Coordination**: Oversee daily operations and shift management.
+- React 18 + TypeScript, Vite 6 (`@vitejs/plugin-react-swc`)
+- Tailwind CSS, Radix UI / shadcn/ui, Lucide icons, Recharts, Sonner
+- Firebase: Authentication, Firestore, Storage, Cloud Functions (`functions/`)
+- Cloudinary (image hosting), Postmark (email), Google Sheets API (export)
 
-###  Employee Dashboard
-- **Task Execution**: View assigned tasks and mark them as complete.
-- **History**: Access personal task history.
-- **Attendance**: QR code scanning for check-ins/verifications.
+## Prerequisites
 
-###  Shared Features
-- **Secure Authentication**: Role-based access control (Owner, Manager, Employee).
-- **Notifications**: Real-time alerts for tasks and updates.
-- **Modern UI**: Responsive and accessible design using Shadcn/UI and Tailwind CSS.
+- Node.js 20+ and npm
+- A Firebase project (Blaze plan required only for Cloud Functions)
+- Firebase CLI: `npm install -g firebase-tools` then `firebase login`
+- Cloudinary account with an unsigned upload preset
+- Google Cloud OAuth client ID (for Sheets export)
 
-##  Tech Stack
+## Environment variables
 
-This project is built using modern web technologies to ensure performance, scalability, and developer experience.
+Copy `.env.example` to `.env.local` and fill in your values. Variable names (all prefixed `VITE_` so Vite exposes them to the client):
 
-- **Frontend Framework**: [React](https://react.dev/)
-- **Build Tool**: [Vite](https://vitejs.dev/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **UI Components**: [Radix UI](https://www.radix-ui.com/) / [Shadcn UI](https://ui.shadcn.com/)
-- **Icons**: [Lucide React](https://lucide.dev/)
-- **Charts**: [Recharts](https://recharts.org/)
-- **Backend / Database**: [Firebase](https://firebase.google.com/) (Authentication, Firestore)
+```
+VITE_FIREBASE_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET
+VITE_FIREBASE_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID
+VITE_FIREBASE_MEASUREMENT_ID
+VITE_CLOUDINARY_CLOUD_NAME
+VITE_CLOUDINARY_UPLOAD_PRESET
+VITE_GOOGLE_OAUTH_CLIENT_ID
+VITE_GOOGLE_SHEET_ID
+```
 
-##  Running the Code
+Never commit `.env.local`. Backend secrets for Cloud Functions are configured separately (see `functions/README.md`).
 
-1.  **Install Dependencies**:
-    `ash
-    npm install
-    `
+## Run and build
 
-2.  **Start Development Server**:
-    `ash
-    npm run dev
-    `
+```bash
+npm install
+npm run dev        # dev server on http://localhost:3000
+npm run typecheck  # tsc --noEmit
+npm run build      # production build -> build/
+npm run preview    # serve the production build locally
+```
 
----
-*Generated for Bluemoon Automation*
+The build output directory is `build/` (configured in `vite.config.ts`).
+
+## Firebase setup
+
+1. Create the Firebase project and enable Authentication (Email/Password), Firestore and Storage.
+2. Seed the Firestore collections as described in [FIREBASE_SETUP_GUIDE.md](FIREBASE_SETUP_GUIDE.md) and [FIRESTORE_DATABASE_SCHEMA.md](FIRESTORE_DATABASE_SCHEMA.md).
+3. Deploy the security rules:
+
+```bash
+firebase deploy --only firestore:rules,storage
+```
+
+Rules live in `firestore.rules` and `storage.rules`; indexes in `firestore.indexes.json`.
+
+## Backend (Cloud Functions)
+
+Scheduled and callable functions live in `functions/` (region `asia-southeast1`):
+
+- `cleanupOldPhotos` - daily at 00:00 Asia/Manila, deletes photos older than 24 hours from Cloudinary and soft-deletes them in Firestore
+- `sendDailyReport` - daily at 23:59 Asia/Manila, emails the financial report to the owner
+- `sendReportManual` - HTTPS callable, triggered from the Owner Sales page (owner/manager only)
+
+```bash
+cd functions
+npm install
+npm run build
+cd ..
+firebase deploy --only functions
+```
+
+See [functions/README.md](functions/README.md) for required environment variables and troubleshooting. `vercel-backend/` contains an earlier Vercel implementation of the same backend and is kept for reference only.
+
+## Documentation index
+
+| File | Purpose |
+|------|---------|
+| [QUICK_START.md](QUICK_START.md) | Five-step Cloud Functions deployment |
+| [FIREBASE_SETUP_GUIDE.md](FIREBASE_SETUP_GUIDE.md) | Step-by-step Firebase console setup and seed data |
+| [FIRESTORE_DATABASE_SCHEMA.md](FIRESTORE_DATABASE_SCHEMA.md) | Firestore collections and document shapes |
+| [FIREBASE_DEPLOYMENT_GUIDE.md](FIREBASE_DEPLOYMENT_GUIDE.md) | Detailed Cloud Functions deployment guide |
+| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Original (Vercel-based) deployment notes |
+| [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) | Historical notes on the Firebase Functions migration |
+| [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) | Historical notes on the photo cleanup / email report work |
+| [functions/README.md](functions/README.md) | Cloud Functions reference |
+| [vercel-backend/README.md](vercel-backend/README.md) | Legacy Vercel backend reference |

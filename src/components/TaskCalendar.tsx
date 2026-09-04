@@ -1,20 +1,37 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Calendar } from './ui/calendar';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Badge } from './ui/badge';
 import { Screen } from '../App';
-import { ArrowLeft, Calendar as CalendarIcon, Image as ImageIcon, Clock, User, LogOut } from 'lucide-react';
+import { ArrowLeft, Calendar as CalendarIcon, Clock, User, LogOut, X } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface TaskCalendarProps {
-  onNavigate: (screen: Screen) => void;
+  onNavigate?: (screen: Screen) => void;
   onBack: () => void;
   onLogout?: () => void;
 }
 
-const mockSubmissionsByDate: Record<string, any[]> = {
+interface TaskSubmission {
+  id: string;
+  taskName: string;
+  employeeName: string;
+  time: string;
+  location: string;
+  photoUrl: string;
+}
+
+// Local-date key (YYYY-MM-DD). Avoids the UTC shift of toISOString() for non-UTC users.
+const toDateKey = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const mockSubmissionsByDate: Record<string, TaskSubmission[]> = {
   '2025-10-22': [
     {
       id: '1',
@@ -61,14 +78,23 @@ const mockSubmissionsByDate: Record<string, any[]> = {
   ],
 };
 
-export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps) {
+export function TaskCalendar({ onBack, onLogout }: TaskCalendarProps) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date(2025, 9, 22)); // Oct 22, 2025
-  const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null);
+  const [selectedSubmission, setSelectedSubmission] = useState<TaskSubmission | null>(null);
 
-  const getSubmissionsForDate = (date: Date | undefined) => {
+  // Close the photo modal on Escape
+  useEffect(() => {
+    if (!selectedSubmission) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedSubmission(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedSubmission]);
+
+  const getSubmissionsForDate = (date: Date | undefined): TaskSubmission[] => {
     if (!date) return [];
-    const dateKey = date.toISOString().split('T')[0];
-    return mockSubmissionsByDate[dateKey] || [];
+    return mockSubmissionsByDate[toDateKey(date)] || [];
   };
 
   const submissions = getSubmissionsForDate(selectedDate);
@@ -80,7 +106,7 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Go back">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div>
@@ -90,10 +116,12 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
             </div>
             {onLogout && (
               <Button
+                type="button"
                 variant="ghost"
                 onClick={onLogout}
                 className="text-gray-700 hover:text-red-600 hover:bg-red-50"
                 title="Logout"
+                aria-label="Logout"
               >
                 <LogOut className="w-5 h-5" />
               </Button>
@@ -117,13 +145,10 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
               <Calendar
                 mode="single"
                 selected={selectedDate}
-                onSelect={setSelectedDate}
+                onSelect={(date: Date | undefined) => setSelectedDate(date)}
                 className="rounded-md border border-blue-100"
                 modifiers={{
-                  hasSubmissions: (date) => {
-                    const dateKey = date.toISOString().split('T')[0];
-                    return !!mockSubmissionsByDate[dateKey];
-                  },
+                  hasSubmissions: (date: Date) => Boolean(mockSubmissionsByDate[toDateKey(date)]),
                 }}
                 modifiersStyles={{
                   hasSubmissions: {
@@ -145,11 +170,9 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
           <Card className="border-blue-100 lg:col-span-2">
             <CardHeader>
               <CardTitle>
-                Submissions for {selectedDate?.toLocaleDateString('en-US', { 
-                  month: 'long', 
-                  day: 'numeric', 
-                  year: 'numeric' 
-                })}
+                {selectedDate
+                  ? `Submissions for ${selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+                  : 'Select a date'}
               </CardTitle>
               <CardDescription>
                 {submissions.length} task{submissions.length !== 1 ? 's' : ''} completed on this day
@@ -164,14 +187,23 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
-                      className="flex gap-4 p-4 rounded-lg border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                      className="flex gap-4 p-4 rounded-lg border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedSubmission(submission)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedSubmission(submission);
+                        }
+                      }}
                     >
                       {/* Photo Thumbnail */}
                       <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
                         <img
                           src={submission.photoUrl}
                           alt={submission.taskName}
+                          loading="lazy"
                           className="w-full h-full object-cover"
                         />
                       </div>
@@ -228,6 +260,9 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
             onClick={() => setSelectedSubmission(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedSubmission.taskName}
           >
             <motion.div
               initial={{ scale: 0.9 }}
@@ -243,11 +278,13 @@ export function TaskCalendar({ onNavigate, onBack, onLogout }: TaskCalendarProps
                     <p className="text-sm text-gray-500">{selectedSubmission.location}</p>
                   </div>
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => setSelectedSubmission(null)}
+                    aria-label="Close"
                   >
-                    <ArrowLeft className="w-5 h-5" />
+                    <X className="w-5 h-5" />
                   </Button>
                 </div>
               </div>

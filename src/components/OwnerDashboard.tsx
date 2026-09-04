@@ -12,7 +12,8 @@ import {
   LogOut,
   UserCog,
   Camera,
-  Coffee
+  Coffee,
+  ClipboardList
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
@@ -116,6 +117,15 @@ export function OwnerDashboard({ user, onNavigate, onLogout }: OwnerDashboardPro
                 title="Manager Tasks"
               >
                 <UserCog className="w-5 h-5 text-cyan-600" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('owner-cup-inventory')}
+                className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                title="Cup Inventory Tracking"
+              >
+                <ClipboardList className="w-5 h-5" />
               </Button>
               <Button
                 variant="ghost"

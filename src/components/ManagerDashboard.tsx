@@ -1,13 +1,14 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import type { DocumentData } from 'firebase/firestore';
 import { uploadImageToCloudinary } from '../lib/cloudinary';
 
 import {
   Calendar as CalendarIcon,
   Camera,
   CheckCircle2,
-  ChevronDown,
   ClipboardList,
+  Coffee,
   Edit,
   FileBarChart,
   Image,
@@ -22,7 +23,7 @@ import {
   X as XIcon
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { toast } from 'sonner';
 import { Screen, User } from '../App';
 import { db } from '../lib/firebase';
@@ -32,7 +33,6 @@ import { Button } from './ui/button';
 import { Calendar } from './ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Checkbox } from './ui/checkbox';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -64,7 +64,7 @@ interface ManagerTask {
   completed: boolean;
   type: 'daily' | 'weekly';
   day?: string;
-  icon?: any;
+  icon?: ComponentType<{ className?: string }>;
 }
 
 interface InventoryItemExtended {
@@ -77,16 +77,21 @@ interface InventoryItemExtended {
   station: 'kitchen' | 'coffee-bar';
 }
 
-const mockInventory: InventoryItemExtended[] = [
-  { id: '1', productName: 'Espresso Beans', sealed: 25, loose: 2, unit: 'kg', lastUpdated: new Date('2025-10-20'), station: 'coffee-bar' },
-  { id: '2', productName: 'Whole Milk', sealed: 12, loose: 1, unit: 'no. of package', lastUpdated: new Date('2025-10-21'), station: 'coffee-bar' },
-  { id: '3', productName: 'Almond Milk', sealed: 8, loose: 0, unit: 'no. of package', lastUpdated: new Date('2025-10-21'), station: 'coffee-bar' },
-  { id: '4', productName: 'Vanilla Syrup', sealed: 5, loose: 1, unit: 'bottle', lastUpdated: new Date('2025-10-20'), station: 'coffee-bar' },
-  { id: '5', productName: 'Paper Cups (16oz)', sealed: 200, loose: 15, unit: 'pcs', lastUpdated: new Date('2025-10-19'), station: 'coffee-bar' },
-  { id: '6', productName: 'Rice', sealed: 50, loose: 5, unit: 'kg', lastUpdated: new Date('2025-10-21'), station: 'kitchen' },
-  { id: '7', productName: 'Cooking Oil', sealed: 8, loose: 2, unit: 'bottle', lastUpdated: new Date('2025-10-20'), station: 'kitchen' },
-  { id: '8', productName: 'Salt', sealed: 10, loose: 1, unit: 'kg', lastUpdated: new Date('2025-10-19'), station: 'kitchen' },
-];
+/** Local-date YYYY-MM-DD (avoids the UTC day shift from toISOString). */
+const toDateKey = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const parseAmount = (value: string): number => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+const numberToInput = (value: unknown): string =>
+  typeof value === 'number' && Number.isFinite(value) ? value.toString() : '';
 
 export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboardProps) {
   // Manager's Own Tasks (loaded from Firestore managerTasks collection)
@@ -95,26 +100,29 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   useEffect(() => {
     const tasksCollection = collection(db, 'managerTasks');
 
-    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
-      const loadedTasks: ManagerTask[] = snapshot.docs
-        .map((docSnap) => {
-          const data = docSnap.data() as any;
-          const status = (data as any).status === 'completed' ? 'completed' : 'pending';
+    const unsubscribe = onSnapshot(
+      tasksCollection,
+      (snapshot) => {
+        const loadedTasks: ManagerTask[] = snapshot.docs
+          .map((docSnap) => {
+            const data: DocumentData = docSnap.data();
+            return {
+              id: docSnap.id,
+              name: typeof data.name === 'string' ? data.name : '',
+              completed: data.status === 'completed',
+              type: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
+              day: typeof data.day === 'string' ? data.day : undefined,
+            };
+          })
+          .filter((task) => task.name.trim().length > 0);
 
-          return {
-            id: docSnap.id,
-            name: data.name || '',
-            completed: status === 'completed',
-            type: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
-            day: data.day,
-            icon: undefined,
-          };
-        })
-
-        .filter((task) => task.name.trim().length > 0);
-
-      setManagerTasks(loadedTasks);
-    });
+        setManagerTasks(loadedTasks);
+      },
+      (error) => {
+        console.error('Error loading manager tasks from Firestore', error);
+        toast.error('Failed to load your tasks.');
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -160,6 +168,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   
   const [financialStatus, setFinancialStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   // Manager Fund State
   const [managerFundAmount, setManagerFundAmount] = useState('');
@@ -170,22 +179,17 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
   // Inventory State
   const [inventory, setInventory] = useState<InventoryItemExtended[]>([]);
-  const [newProductName, setNewProductName] = useState('');
-  const [newProductSealed, setNewProductSealed] = useState('');
-  const [newProductLoose, setNewProductLoose] = useState('');
-  const [newProductUnit, setNewProductUnit] = useState('kg');
-  const [wastedInventoryImage, setWastedInventoryImage] = useState<File | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'inventory'),
       (snapshot) => {
         const items: InventoryItemExtended[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
+          const data: DocumentData = docSnap.data();
           const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
           const loose = typeof data.loose === 'number' ? data.loose : 0;
-          const unit = data.unit || '';
-          const lastUpdatedRaw = (data as any).lastUpdated;
+          const unit = typeof data.unit === 'string' ? data.unit : '';
+          const lastUpdatedRaw = data.lastUpdated;
           const lastUpdated = lastUpdatedRaw && typeof lastUpdatedRaw.toDate === 'function'
             ? lastUpdatedRaw.toDate()
             : new Date();
@@ -205,6 +209,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       },
       (error) => {
         console.error('Error loading inventory from Firestore', error);
+        toast.error('Failed to load inventory.');
       }
     );
 
@@ -256,6 +261,9 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
         .filter((emp) => emp.isActive && emp.name.trim().length > 0);
 
       setEmployees(loadedEmployees);
+    }, (error) => {
+      console.error('Error loading employees from Firestore', error);
+      toast.error('Failed to load employees.');
     });
 
     return () => unsubscribe();
@@ -335,8 +343,27 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     setApepoOthers('');
   };
 
+  const resetFinancialForm = () => {
+    setStartingCash('');
+    setStartingDigital('');
+    setStartingBank('');
+    setTurnoverCash('');
+    setTurnoverDigital('');
+    setTurnoverBank('');
+    setClosingStartCash('');
+    setClosingStartDigital('');
+    setClosingStartBank('');
+    setClosingTurnoverCash('');
+    setClosingTurnoverDigital('');
+    setClosingTurnoverBank('');
+    setManagerFundAmount('');
+    setExpenses('');
+    setFinancialStatus('pending');
+  };
+
   const handleSubmitFinancialReport = async () => {
-    // Existing validation
+    if (isSubmittingReport) return;
+
     if (
       !startingCash ||
       !startingDigital ||
@@ -355,7 +382,22 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       return;
     }
 
-    // NEW: Validate required photos
+    const amounts = [
+      startingCash, startingDigital, startingBank,
+      turnoverCash, turnoverDigital, turnoverBank,
+      closingStartCash, closingStartDigital, closingStartBank,
+      closingTurnoverCash, closingTurnoverDigital, closingTurnoverBank,
+    ].map(parseAmount);
+    if (amounts.some((n) => Number.isNaN(n) || n < 0)) {
+      toast.error('Financial amounts must be valid, non-negative numbers');
+      return;
+    }
+    const managerFundValue = managerFundAmount ? parseAmount(managerFundAmount) : 0;
+    if (Number.isNaN(managerFundValue) || managerFundValue < 0) {
+      toast.error('Manager fund amount must be a valid, non-negative number');
+      return;
+    }
+
     if (!openingImage || !closingImage) {
       toast.error('Please upload opening and closing shift photos');
       return;
@@ -366,45 +408,27 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       return;
     }
 
+    setIsSubmittingReport(true);
     try {
       const reportDate = selectedDate || new Date();
-      const dateString = reportDate.toISOString().split('T')[0];
+      const dateString = toDateKey(reportDate);
 
-      // Check for existing report on this date and delete it
-      const existingReportsSnapshot = await getDocs(
-        query(
-          collection(db, 'financialReports'),
-          where('date', '==', dateString)
-        )
-      );
-
-      // Delete existing report(s) for this date
-      for (const docSnap of existingReportsSnapshot.docs) {
-        await deleteDoc(doc(db, 'financialReports', docSnap.id));
-      }
-
-      // Show uploading toast
+      // Upload photos first so a failed upload never wipes an existing report
       toast.loading('Uploading 3 photos...', { id: 'upload-toast' });
-
-      // Upload opening image
-      const openingUpload = await uploadImageToCloudinary(
-        openingImage,
-        'financialReports/opening'
-      );
-
-      // Upload closing image
-      const closingUpload = await uploadImageToCloudinary(
-        closingImage,
-        'financialReports/closing'
-      );
-
-      // Upload manager fund image
-      const managerFundUpload = await uploadImageToCloudinary(
-        managerFundImage,
-        'financialReports/managerFund'
-      );
-
+      const [openingUpload, closingUpload, managerFundUpload] = await Promise.all([
+        uploadImageToCloudinary(openingImage, 'financialReports/opening'),
+        uploadImageToCloudinary(closingImage, 'financialReports/closing'),
+        uploadImageToCloudinary(managerFundImage, 'financialReports/managerFund'),
+      ]);
       toast.dismiss('upload-toast');
+
+      // Replace any existing report(s) for this date
+      const existingReportsSnapshot = await getDocs(
+        query(collection(db, 'financialReports'), where('date', '==', dateString))
+      );
+      await Promise.all(
+        existingReportsSnapshot.docs.map((docSnap) => deleteDoc(doc(db, 'financialReports', docSnap.id)))
+      );
 
       const reportsCollection = collection(db, 'financialReports');
       const reportDocRef = doc(reportsCollection);
@@ -417,29 +441,29 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
         timestamp: serverTimestamp(),
 
         opening: {
-          cash: parseFloat(startingCash),
-          digitalWallet: parseFloat(startingDigital),
-          bank: parseFloat(startingBank),
-          turnoverCash: parseFloat(turnoverCash),
-          turnoverDigital: parseFloat(turnoverDigital),
-          turnoverBank: parseFloat(turnoverBank),
+          cash: amounts[0],
+          digitalWallet: amounts[1],
+          bank: amounts[2],
+          turnoverCash: amounts[3],
+          turnoverDigital: amounts[4],
+          turnoverBank: amounts[5],
           imageUrl: openingUpload.secureUrl,
           imagePath: openingUpload.publicId,
         },
 
         closing: {
-          cash: parseFloat(closingStartCash),
-          digitalWallet: parseFloat(closingStartDigital),
-          bank: parseFloat(closingStartBank),
-          turnoverCash: parseFloat(closingTurnoverCash),
-          turnoverDigital: parseFloat(closingTurnoverDigital),
-          turnoverBank: parseFloat(closingTurnoverBank),
+          cash: amounts[6],
+          digitalWallet: amounts[7],
+          bank: amounts[8],
+          turnoverCash: amounts[9],
+          turnoverDigital: amounts[10],
+          turnoverBank: amounts[11],
           imageUrl: closingUpload.secureUrl,
           imagePath: closingUpload.publicId,
         },
 
         managerFund: {
-          amount: managerFundAmount ? parseFloat(managerFundAmount) : 0,
+          amount: managerFundValue,
           imageUrl: managerFundUpload.secureUrl,
           imagePath: managerFundUpload.publicId,
         },
@@ -450,30 +474,16 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       });
 
       toast.success('Financial report submitted with photos!');
-      setFinancialStatus('pending');
-
-      // Clear all fields including images
-      setStartingCash('');
-      setStartingDigital('');
-      setStartingBank('');
-      setTurnoverCash('');
-      setTurnoverDigital('');
-      setTurnoverBank('');
-      setClosingStartCash('');
-      setClosingStartDigital('');
-      setClosingStartBank('');
-      setClosingTurnoverCash('');
-      setClosingTurnoverDigital('');
-      setClosingTurnoverBank('');
-      setManagerFundAmount('');
-      setExpenses('');
+      resetFinancialForm();
       setOpeningImage(null);
       setClosingImage(null);
       setManagerFundImage(null);
     } catch (error) {
       toast.dismiss('upload-toast');
       console.error('Error submitting financial report:', error);
-      toast.error('Failed to upload photos. Please try again.');
+      toast.error('Failed to submit financial report. Please try again.');
+    } finally {
+      setIsSubmittingReport(false);
     }
   };
 
@@ -484,70 +494,46 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
     if (!date) return;
 
     try {
-      const dateString = date.toISOString().split('T')[0];
-      const reportsSnapshot = await getDocs(collection(db, 'financialReports'));
-
-      const report = reportsSnapshot.docs.find(doc => doc.data().date === dateString);
+      const dateString = toDateKey(date);
+      const reportsSnapshot = await getDocs(
+        query(collection(db, 'financialReports'), where('date', '==', dateString))
+      );
+      const report = reportsSnapshot.docs[0];
 
       if (report) {
-        const data = report.data();
+        const data: DocumentData = report.data();
+        const opening = data.opening ?? {};
+        const closing = data.closing ?? {};
 
-        // Load opening shift data
-        setStartingCash(data.opening?.cash?.toString() || '');
-        setStartingDigital(data.opening?.digitalWallet?.toString() || '');
-        setStartingBank(data.opening?.bank?.toString() || '');
-        setTurnoverCash(data.opening?.turnoverCash?.toString() || '');
-        setTurnoverDigital(data.opening?.turnoverDigital?.toString() || '');
-        setTurnoverBank(data.opening?.turnoverBank?.toString() || '');
+        setStartingCash(numberToInput(opening.cash));
+        setStartingDigital(numberToInput(opening.digitalWallet));
+        setStartingBank(numberToInput(opening.bank));
+        setTurnoverCash(numberToInput(opening.turnoverCash));
+        setTurnoverDigital(numberToInput(opening.turnoverDigital));
+        setTurnoverBank(numberToInput(opening.turnoverBank));
 
-        // Load closing shift data
-        setClosingStartCash(data.closing?.cash?.toString() || '');
-        setClosingStartDigital(data.closing?.digitalWallet?.toString() || '');
-        setClosingStartBank(data.closing?.bank?.toString() || '');
-        setClosingTurnoverCash(data.closing?.turnoverCash?.toString() || '');
-        setClosingTurnoverDigital(data.closing?.turnoverDigital?.toString() || '');
-        setClosingTurnoverBank(data.closing?.turnoverBank?.toString() || '');
+        setClosingStartCash(numberToInput(closing.cash));
+        setClosingStartDigital(numberToInput(closing.digitalWallet));
+        setClosingStartBank(numberToInput(closing.bank));
+        setClosingTurnoverCash(numberToInput(closing.turnoverCash));
+        setClosingTurnoverDigital(numberToInput(closing.turnoverDigital));
+        setClosingTurnoverBank(numberToInput(closing.turnoverBank));
 
-        // Load manager fund and expenses
-        setManagerFundAmount(data.managerFund?.amount?.toString() || '');
-        setExpenses(data.expenses || '');
-
-        setFinancialStatus(data.status || 'pending');
+        setManagerFundAmount(numberToInput(data.managerFund?.amount));
+        setExpenses(typeof data.expenses === 'string' ? data.expenses : '');
+        setFinancialStatus(
+          data.status === 'approved' || data.status === 'rejected' ? data.status : 'pending'
+        );
 
         toast.success(`Loaded report for ${dateString}`);
       } else {
-        // Clear form if no report for this date
-        setStartingCash('');
-        setStartingDigital('');
-        setStartingBank('');
-        setTurnoverCash('');
-        setTurnoverDigital('');
-        setTurnoverBank('');
-        setClosingStartCash('');
-        setClosingStartDigital('');
-        setClosingStartBank('');
-        setClosingTurnoverCash('');
-        setClosingTurnoverDigital('');
-        setClosingTurnoverBank('');
-        setManagerFundAmount('');
-        setExpenses('');
-        setFinancialStatus('pending');
-
+        resetFinancialForm();
         toast.info(`No report found for ${dateString}`);
       }
     } catch (error) {
       console.error('Error loading financial report:', error);
       toast.error('Failed to load report');
     }
-  };
-
-  const handleDeleteInventoryItem = (id: string) => {
-    setInventory(inventory.filter((item) => item.id !== id));
-    toast.success('Product removed from inventory');
-  };
-
-  const handleSubmitInventory = () => {
-    toast.success('Inventory submitted to owner!');
   };
 
   const handleSubmitRequest = async () => {
@@ -590,6 +576,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       toast.error('Failed to submit request. Please try again.');
     }
   };
+  
 
   // Employee CRUD Handlers
   const handleAddEmployee = () => {
@@ -668,7 +655,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   };
 
   const handleDeleteEmployee = async (employeeId: string) => {
-    if (!confirm('Are you sure you want to delete this employee?')) {
+    if (!window.confirm('Are you sure you want to delete this employee?')) {
       return;
     }
 
@@ -696,7 +683,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
       return;
     }
 
-    const daysWorked = parseInt(payrollDaysWorked);
+    const daysWorked = parseInt(payrollDaysWorked, 10);
     const payRate = parseFloat(payrollPayRate);
 
     if (isNaN(daysWorked) || isNaN(payRate) || daysWorked <= 0 || payRate <= 0) {
@@ -772,12 +759,11 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
+    <div className="min-h-screen bg-linear-to-br from-cyan-50 via-white to-cyan-50">
       {/* Header */}
       <header className="bg-white border-b border-cyan-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            {/* ... (rest of the code remains the same) */}
             <div className="flex items-center gap-3">
               <img src={logo} alt="Bluemoon" className="h-8" />
             </div>
@@ -790,6 +776,23 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                 title="View Photo Submissions"
               >
                 <Camera className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('recipes-list')}
+                title="Recipes"
+              >
+                <Coffee className="w-5 h-5 text-cyan-600" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('manager-cup-inventory')}
+                className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                title="Cup Inventory Tracking"
+              >
+                <ClipboardList className="w-5 h-5" />
               </Button>
               <Button
                 variant="ghost"
@@ -849,7 +852,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Daily Tasks */}
               <Card className="border-cyan-100 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-cyan-50 to-blue-50">
+                <CardHeader className="bg-linear-to-r from-cyan-50 to-blue-50">
                   <CardTitle className="flex items-center gap-2 text-cyan-800">
                     <ClipboardList className="w-5 h-5" />
                     Daily Tasks
@@ -886,7 +889,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
               {/* Weekly Tasks */}
               <Card className="border-purple-100 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-purple-50 to-pink-50">
+                <CardHeader className="bg-linear-to-r from-purple-50 to-pink-50">
                   <CardTitle className="flex items-center gap-2 text-purple-800">
                     <CalendarIcon className="w-5 h-5" />
                     Weekly Tasks
@@ -910,7 +913,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                             checked={task.completed}
                             onCheckedChange={() => handleToggleManagerTask(task.id)}
                           />
-                          <TaskIcon className="w-5 h-5 text-purple-600 flex-shrink-0" />
+                          <TaskIcon className="w-5 h-5 text-purple-600 shrink-0" />
                           <div className="flex-1">
                             <label
                               htmlFor={task.id}
@@ -936,80 +939,64 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
             {/* Assign Tasks to Employees */}
             <Card className="border-cyan-100">
-              <Collapsible open={isEmployeeTaskOpen} onOpenChange={setIsEmployeeTaskOpen}>
-                <CollapsibleTrigger className="w-full">
-                  <CardHeader className="cursor-pointer hover:bg-cyan-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="text-left">
-                        <CardTitle>Assign Tasks to Employees</CardTitle>
-                        <CardDescription>Create and assign tasks to your team</CardDescription>
-                      </div>
-                      <motion.div
-                        animate={{ rotate: isEmployeeTaskOpen ? 180 : 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ChevronDown className="w-5 h-5 text-gray-500" />
-                      </motion.div>
-                    </div>
-                  </CardHeader>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <CardContent className="space-y-4 pt-0">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="employeeTaskName">Task Name</Label>
-                        <Input
-                          id="employeeTaskName"
-                          placeholder="e.g., Clean coffee machine"
-                          value={employeeTaskName}
-                          onChange={(e) => setEmployeeTaskName(e.target.value)}
-                        />
-                      </div>
+              <CardHeader>
+                <CardTitle>Assign Task to Team</CardTitle>
+                <CardDescription>Create and assign tasks to your team members</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="employeeTaskName">Task Name</Label>
+                    <Input
+                      id="employeeTaskName"
+                      placeholder="e.g., Clean coffee machine"
+                      value={employeeTaskName}
+                      onChange={(e) => setEmployeeTaskName(e.target.value)}
+                    />
+                  </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="employeeTaskDescription">Task Description</Label>
-                        <Input
-                          id="employeeTaskDescription"
-                          placeholder="Optional details or instructions..."
-                          value={employeeTaskDescription}
-                          onChange={(e) => setEmployeeTaskDescription(e.target.value)}
-                        />
-                      </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="employeeTaskDescription">Task Description</Label>
+                    <Input
+                      id="employeeTaskDescription"
+                      placeholder="Optional details or instructions..."
+                      value={employeeTaskDescription}
+                      onChange={(e) => setEmployeeTaskDescription(e.target.value)}
+                    />
+                  </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="employeeTaskStation">Station</Label>
-                        <Select value={employeeTaskStation} onValueChange={(v: 'kitchen' | 'coffee-bar') => setEmployeeTaskStation(v)}>
-                          <SelectTrigger id="employeeTaskStation">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="kitchen">Kitchen</SelectItem>
-                            <SelectItem value="coffee-bar">Coffee Bar</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="employeeTaskStation">Station</Label>
+                    <Select value={employeeTaskStation} onValueChange={(v: 'kitchen' | 'coffee-bar') => setEmployeeTaskStation(v)}>
+                      <SelectTrigger id="employeeTaskStation">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="kitchen">Kitchen</SelectItem>
+                        <SelectItem value="coffee-bar">Coffee Bar</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="employeeTaskCategory">Category</Label>
-                        <Select value={employeeTaskCategory} onValueChange={(v: 'opening' | 'closing') => setEmployeeTaskCategory(v)}>
-                          <SelectTrigger id="employeeTaskCategory">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="opening">Opening</SelectItem>
-                            <SelectItem value="closing">Closing</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="employeeTaskCategory">Category</Label>
+                    <Select value={employeeTaskCategory} onValueChange={(v: 'opening' | 'closing') => setEmployeeTaskCategory(v)}>
+                      <SelectTrigger id="employeeTaskCategory">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="opening">Opening</SelectItem>
+                        <SelectItem value="closing">Closing</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-                    <Button onClick={handleAssignEmployeeTask} className="w-full bg-cyan-600 hover:bg-cyan-700">
-                      <Plus className="w-4 h-4 mr-2" />
-                      Create Task for Employees
-                    </Button>
-                  </CardContent>
-                </CollapsibleContent>
-              </Collapsible>
+                <Button onClick={handleAssignEmployeeTask} className="w-full bg-cyan-600 hover:bg-cyan-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Task for Team
+                </Button>
+              </CardContent>
             </Card>
           </TabsContent>
 
@@ -1017,7 +1004,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
           <TabsContent value="reports" className="space-y-6">
             {/* Calendar for History */}
             <Card className="border-cyan-100 shadow-md">
-              <CardHeader className="bg-gradient-to-r from-cyan-50 to-blue-50">
+              <CardHeader className="bg-linear-to-r from-cyan-50 to-blue-50">
                 <CardTitle className="flex items-center gap-2 text-cyan-800">
                   <CalendarIcon className="w-5 h-5" />
                   View History
@@ -1034,7 +1021,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
               </CardContent>
             </Card>
 
-            {/* Financial Report - NOW FIRST */}
+            {/* Financial Report */}
             <Card className="border-cyan-100">
               <CardHeader>
                 <CardTitle>Financial Report</CardTitle>
@@ -1234,7 +1221,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                 </div>
 
                 <div className="flex items-center justify-between gap-4">
-                  <Button onClick={handleSubmitFinancialReport} className="flex-1 bg-green-600 hover:bg-green-700">
+                  <Button onClick={handleSubmitFinancialReport} disabled={isSubmittingReport} className="flex-1 bg-green-600 hover:bg-green-700">
                     <FileBarChart className="w-4 h-4 mr-2" />
                     Submit Financial Report
                   </Button>
@@ -1268,7 +1255,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
 
                 <div className="space-y-2">
                   <Label htmlFor="apepoPeople">P - People (Employees and Roles)</Label>
-                  <Select value={apepoPeople} onValueChange={setApepoPeople}>
+                  <Select value={apepoPeople} onValueChange={(value: string) => setApepoPeople(value)}>
                     <SelectTrigger id="apepoPeople">
                       <SelectValue placeholder="Select employee and role" />
                     </SelectTrigger>
@@ -1431,6 +1418,13 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {inventory.filter(item => item.station === 'kitchen' && item.productName.trim().length > 0).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-gray-500 py-6">
+                                No kitchen inventory items yet.
+                              </TableCell>
+                            </TableRow>
+                          )}
                           {inventory
                             .filter(item => item.station === 'kitchen')
                             .filter(item => item.productName && item.productName.trim().length > 0)
@@ -1481,6 +1475,13 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {inventory.filter(item => item.station === 'coffee-bar' && item.productName.trim().length > 0).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-gray-500 py-6">
+                                No coffee bar inventory items yet.
+                              </TableCell>
+                            </TableRow>
+                          )}
                           {inventory
                             .filter(item => item.station === 'coffee-bar')
                             .filter(item => item.productName && item.productName.trim().length > 0)
@@ -1680,6 +1681,13 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                       </TableRow>
                     </TableHeader>
                     <TableBody>
+                      {employees.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-gray-500 py-6">
+                            No employees yet. Add one below.
+                          </TableCell>
+                        </TableRow>
+                      )}
                       {employees.map((employee) => (
                         <TableRow key={employee.id}>
                           <TableCell>{employee.name}</TableCell>
@@ -1762,7 +1770,7 @@ export function ManagerDashboard({ user, onNavigate, onLogout }: ManagerDashboar
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="emp-status">Status</Label>
-                          <Select value={employeeFormData.status} onValueChange={(value) => setEmployeeFormData({ ...employeeFormData, status: value as 'full-time' | 'part-time' })}>
+                          <Select value={employeeFormData.status} onValueChange={(value: string) => setEmployeeFormData({ ...employeeFormData, status: value as 'full-time' | 'part-time' })}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>

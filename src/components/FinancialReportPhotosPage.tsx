@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, Camera, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
@@ -20,26 +20,33 @@ interface FinancialReportPhotosPageProps {
 export function FinancialReportPhotosPage({ reportData, onBack }: FinancialReportPhotosPageProps) {
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ url: string; title: string } | null>(null);
 
+  // Close the fullscreen viewer on Escape and lock body scroll while it is open
+  useEffect(() => {
+    if (!fullscreenPhoto) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreenPhoto(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [fullscreenPhoto]);
+
+  const reportDate = (() => {
+    const parsed = new Date(reportData.date);
+    return Number.isNaN(parsed.getTime()) ? reportData.date || 'Unknown' : parsed.toLocaleDateString();
+  })();
+
   const photos = [
-    {
-      url: reportData.opening?.imageUrl,
-      title: 'Opening Shift',
-      color: 'cyan',
-      available: !!reportData.opening?.imageUrl
-    },
-    {
-      url: reportData.closing?.imageUrl,
-      title: 'Closing Shift',
-      color: 'orange',
-      available: !!reportData.closing?.imageUrl
-    },
-    {
-      url: reportData.managerFund?.imageUrl,
-      title: 'Manager Fund',
-      color: 'purple',
-      available: !!reportData.managerFund?.imageUrl
-    }
-  ].filter(photo => photo.available);
+    { url: reportData.opening?.imageUrl, title: 'Opening Shift', color: 'cyan' },
+    { url: reportData.closing?.imageUrl, title: 'Closing Shift', color: 'orange' },
+    { url: reportData.managerFund?.imageUrl, title: 'Manager Fund', color: 'purple' },
+  ].filter((photo): photo is { url: string; title: string; color: string } => !!photo.url);
 
   const getColorClasses = (color: string) => {
     const colors = {
@@ -71,6 +78,7 @@ export function FinancialReportPhotosPage({ reportData, onBack }: FinancialRepor
                 size="icon"
                 onClick={onBack}
                 className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                aria-label="Back"
               >
                 <ArrowLeft className="w-5 h-5" />
               </Button>
@@ -78,7 +86,7 @@ export function FinancialReportPhotosPage({ reportData, onBack }: FinancialRepor
               <div>
                 <h1 className="text-xl text-gray-900">Financial Report Photos</h1>
                 <p className="text-sm text-gray-500">
-                  Report Date: {new Date(reportData.date).toLocaleDateString()}
+                  Report Date: {reportDate}
                 </p>
               </div>
             </div>
@@ -101,20 +109,23 @@ export function FinancialReportPhotosPage({ reportData, onBack }: FinancialRepor
                   <img
                     src={photo.url}
                     alt={photo.title}
-                    className="w-full h-full object-cover cursor-pointer"
+                    className="w-full h-full object-cover"
                     loading="lazy"
-                    onClick={() => setFullscreenPhoto({ url: photo.url!, title: photo.title })}
                   />
                   <Badge className={`absolute top-3 left-3 ${getBadgeColor(photo.color)} shadow-lg`}>
                     <Camera className="w-3 h-3 mr-1" />
                     {photo.title}
                   </Badge>
-                  <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10 transition-opacity cursor-pointer flex items-center justify-center"
-                       onClick={() => setFullscreenPhoto({ url: photo.url!, title: photo.title })}>
-                    <span className="opacity-0 hover:opacity-100 bg-white bg-opacity-90 px-4 py-2 rounded-full text-sm font-medium text-gray-800 transition-opacity">
+                  <button
+                    type="button"
+                    aria-label={`View ${photo.title} photo fullscreen`}
+                    className="group absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10 focus-visible:bg-opacity-10 transition-opacity cursor-pointer flex items-center justify-center"
+                    onClick={() => setFullscreenPhoto({ url: photo.url, title: photo.title })}
+                  >
+                    <span className="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 bg-white bg-opacity-90 px-4 py-2 rounded-full text-sm font-medium text-gray-800 transition-opacity">
                       Click to view fullscreen
                     </span>
-                  </div>
+                  </button>
                 </div>
                 <CardContent className="p-4">
                   <h3 className="font-semibold text-gray-900">{photo.title}</h3>
@@ -141,6 +152,9 @@ export function FinancialReportPhotosPage({ reportData, onBack }: FinancialRepor
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${fullscreenPhoto.title} photo`}
             onClick={() => setFullscreenPhoto(null)}
           >
             {/* Close Button - Top Right, doesn't overlay image */}
@@ -150,6 +164,8 @@ export function FinancialReportPhotosPage({ reportData, onBack }: FinancialRepor
                 variant="ghost"
                 size="icon"
                 className="bg-white hover:bg-gray-100 rounded-full shadow-2xl"
+                aria-label="Close fullscreen photo"
+                autoFocus
               >
                 <X className="w-6 h-6 text-gray-900" />
               </Button>

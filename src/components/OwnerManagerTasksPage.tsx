@@ -1,5 +1,5 @@
-import { collection, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
-import { ArrowLeft, Calendar, CalendarDays, CheckCircle2, Clock, LogOut, Plus, UserCog } from 'lucide-react';
+import { Timestamp, collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { ArrowLeft, Calendar, CalendarDays, CheckCircle2, Clock, LogOut, Plus, Trash2, UserCog } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -11,7 +11,6 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Textarea } from './ui/textarea';
 
 interface OwnerManagerTasksPageProps {
   onBack: () => void;
@@ -30,36 +29,44 @@ interface ManagerTask {
 export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPageProps) {
   const [tasks, setTasks] = useState<ManagerTask[]>([]);
   const [newTaskName, setNewTaskName] = useState('');
-  const [newTaskDescription, setNewTaskDescription] = useState('');
   const [taskType, setTaskType] = useState<'daily' | 'weekly'>('daily');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const tasksCollection = collection(db, 'managerTasks');
 
-    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
-      const loadedTasks: ManagerTask[] = snapshot.docs
-        .map((docSnap) => {
-          const data = docSnap.data() as any;
-          const assignedDateRaw = (data as any).assignedDate;
-          const assignedDate =
-            assignedDateRaw && typeof assignedDateRaw.toDate === 'function'
-              ? assignedDateRaw.toDate()
-              : new Date();
+    const unsubscribe = onSnapshot(
+      tasksCollection,
+      (snapshot) => {
+        const loadedTasks: ManagerTask[] = snapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            const assignedDateRaw = data.assignedDate;
+            const assignedDate: Date =
+              assignedDateRaw instanceof Timestamp ? assignedDateRaw.toDate() : new Date();
 
-          return {
-            id: docSnap.id,
-            name: data.name || '',
-            description: data.description || '',
-            taskType: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
-            assignedDate,
-            status: (data.status === 'completed' ? 'completed' : 'pending') as 'pending' | 'completed',
-          };
-        })
-        .filter((task) => task.name.trim().length > 0);
+            return {
+              id: docSnap.id,
+              name: typeof data.name === 'string' ? data.name : '',
+              description: typeof data.description === 'string' ? data.description : '',
+              taskType: (data.type === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly',
+              assignedDate,
+              status: (data.status === 'completed' ? 'completed' : 'pending') as 'pending' | 'completed',
+            };
+          })
+          .filter((task) => task.name.trim().length > 0);
 
-      loadedTasks.sort((a, b) => b.assignedDate.getTime() - a.assignedDate.getTime());
-      setTasks(loadedTasks);
-    });
+        loadedTasks.sort((a, b) => b.assignedDate.getTime() - a.assignedDate.getTime());
+        setTasks(loadedTasks);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error loading manager tasks', error);
+        toast.error('Failed to load manager tasks.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -69,12 +76,9 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
       toast.error('Please enter a task name');
       return;
     }
+    if (saving) return;
 
-    if (!newTaskDescription.trim()) {
-      toast.error('Please enter a task description');
-      return;
-    }
-
+    setSaving(true);
     try {
       const tasksCollection = collection(db, 'managerTasks');
       const taskDocRef = doc(tasksCollection);
@@ -82,7 +86,6 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
       await setDoc(taskDocRef, {
         taskId: taskDocRef.id,
         name: newTaskName.trim(),
-        description: newTaskDescription.trim(),
         type: taskType,
         status: 'pending',
         assignedDate: serverTimestamp(),
@@ -92,11 +95,27 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
 
       toast.success(`${taskType === 'daily' ? 'Daily' : 'Weekly'} task assigned to manager!`);
       setNewTaskName('');
-      setNewTaskDescription('');
       setTaskType('daily');
     } catch (error) {
       console.error('Error assigning manager task', error);
       toast.error('Failed to assign task. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string, taskName: string) => {
+    if (!window.confirm(`Are you sure you want to delete the task "${taskName}"?`)) {
+      return;
+    }
+
+    try {
+      const taskDocRef = doc(db, 'managerTasks', taskId);
+      await deleteDoc(taskDocRef);
+      toast.success('Task deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting task', error);
+      toast.error('Failed to delete task. Please try again.');
     }
   };
 
@@ -150,17 +169,12 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
                 placeholder="Enter task name..."
                 value={newTaskName}
                 onChange={(e) => setNewTaskName(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="taskDescription">Task Description</Label>
-              <Textarea
-                id="taskDescription"
-                placeholder="Enter detailed task description..."
-                value={newTaskDescription}
-                onChange={(e) => setNewTaskDescription(e.target.value)}
-                rows={3}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddTask();
+                  }
+                }}
               />
             </div>
 
@@ -186,9 +200,9 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
               </RadioGroup>
             </div>
 
-            <Button onClick={handleAddTask} className="w-full bg-cyan-600 hover:bg-cyan-700">
+            <Button type="button" onClick={handleAddTask} disabled={saving} className="w-full bg-cyan-600 hover:bg-cyan-700">
               <Plus className="w-4 h-4 mr-2" />
-              Add Task
+              {saving ? 'Adding...' : 'Add Task'}
             </Button>
           </CardContent>
         </Card>
@@ -213,7 +227,11 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
                 <CardDescription>Tasks awaiting completion by the manager</CardDescription>
               </CardHeader>
               <CardContent>
-                {pendingTasks.length === 0 ? (
+                {loading ? (
+                  <div className="flex justify-center items-center py-8" role="status" aria-label="Loading tasks">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-600"></div>
+                  </div>
+                ) : pendingTasks.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
                     <p>No pending tasks</p>
@@ -251,9 +269,21 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
                               </p>
                             </div>
                           </div>
-                          <Badge variant="outline" className="border-orange-400 text-orange-700 ml-2">
-                            Pending
-                          </Badge>
+                          <div className="flex items-center gap-2 ml-2">
+                            <Badge variant="outline" className="border-orange-400 text-orange-700">
+                              Pending
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteTask(task.id, task.name)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 w-8"
+                              title="Delete task"
+                              aria-label="Delete task"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}
@@ -270,7 +300,11 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
                 <CardDescription>Tasks successfully completed by the manager</CardDescription>
               </CardHeader>
               <CardContent>
-                {completedTasks.length === 0 ? (
+                {loading ? (
+                  <div className="flex justify-center items-center py-8" role="status" aria-label="Loading tasks">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-600"></div>
+                  </div>
+                ) : completedTasks.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-50" />
                     <p>No completed tasks</p>
@@ -308,9 +342,21 @@ export function OwnerManagerTasksPage({ onBack, onLogout }: OwnerManagerTasksPag
                               </p>
                             </div>
                           </div>
-                          <Badge className="bg-green-600 ml-2">
-                            Completed
-                          </Badge>
+                          <div className="flex items-center gap-2 ml-2">
+                            <Badge className="bg-green-600">
+                              Completed
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteTask(task.id, task.name)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 w-8"
+                              title="Delete task"
+                              aria-label="Delete task"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}

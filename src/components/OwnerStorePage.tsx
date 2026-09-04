@@ -5,7 +5,7 @@ import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ArrowLeft, LogOut, Store, CheckCircle2, Clock, ChefHat, Coffee } from 'lucide-react';
 import { motion } from 'motion/react';
-import { collection, getDocs } from 'firebase/firestore';
+import { Timestamp, collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 interface OwnerStorePageProps {
@@ -27,80 +27,99 @@ export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
   const [selectedStation, setSelectedStation] = useState<'all' | 'Kitchen' | 'Coffee Bar'>('all');
   const [tasks, setTasks] = useState<TaskData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchTasksAndSubmissions = async () => {
       try {
         setLoading(true);
+        setError(null);
 
-        // Fetch all tasks
-        const tasksSnapshot = await getDocs(collection(db, 'tasks'));
-        const tasksData: { [key: string]: any } = {};
+        const [tasksSnapshot, submissionsSnapshot] = await Promise.all([
+          getDocs(collection(db, 'tasks')),
+          getDocs(collection(db, 'taskSubmissions')),
+        ]);
 
-        tasksSnapshot.docs.forEach((doc) => {
-          const data = doc.data();
-          tasksData[data.taskId || doc.id] = {
-            id: data.taskId || doc.id,
-            name: data.name || '',
+        const tasksData: Record<string, TaskData> = {};
+        tasksSnapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const id = typeof data.taskId === 'string' && data.taskId ? data.taskId : docSnap.id;
+          tasksData[id] = {
+            id,
+            name: typeof data.name === 'string' ? data.name : '',
             station: data.station === 'coffee-bar' ? 'Coffee Bar' : 'Kitchen',
             category: data.category === 'opening' ? 'Opening' : 'Closing',
-            status: 'pending' as 'pending' | 'completed',
+            status: 'pending',
           };
         });
 
-        // Fetch all task submissions (completed tasks)
-        const submissionsSnapshot = await getDocs(collection(db, 'taskSubmissions'));
+        // Submissions store `date` as a UTC ISO date string (see QRScanScreen), so compare in the same form
         const today = new Date().toISOString().split('T')[0];
 
-        // Create a map to track the latest submission for each task today
-        const latestSubmissions: { [key: string]: any } = {};
+        interface SubmissionData {
+          employeeName?: string;
+          timestamp?: Timestamp;
+        }
+        const latestSubmissions: Record<string, SubmissionData> = {};
 
-        submissionsSnapshot.docs.forEach((doc) => {
-          const data = doc.data();
-          const submissionDate = data.date || data.timestamp?.toDate().toISOString().split('T')[0];
+        submissionsSnapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const timestamp = data.timestamp instanceof Timestamp ? data.timestamp : undefined;
+          const submissionDate =
+            typeof data.date === 'string' && data.date
+              ? data.date
+              : timestamp
+              ? timestamp.toDate().toISOString().split('T')[0]
+              : undefined;
+          const taskId = typeof data.taskId === 'string' ? data.taskId : '';
 
-          // Only include today's submissions
-          if (submissionDate === today) {
-            const taskId = data.taskId;
+          if (submissionDate !== today || !taskId) return;
 
-            // Keep only the latest submission for each task
-            if (!latestSubmissions[taskId] ||
-                (data.timestamp && data.timestamp.toMillis() > latestSubmissions[taskId].timestamp?.toMillis())) {
-              latestSubmissions[taskId] = data;
-            }
+          const existing = latestSubmissions[taskId];
+          const newMillis = timestamp ? timestamp.toMillis() : 0;
+          const existingMillis = existing?.timestamp ? existing.timestamp.toMillis() : 0;
+          if (!existing || newMillis > existingMillis) {
+            latestSubmissions[taskId] = {
+              employeeName: typeof data.employeeName === 'string' ? data.employeeName : undefined,
+              timestamp,
+            };
           }
         });
 
         // Merge tasks with their submission data
-        const mergedTasks: TaskData[] = Object.values(tasksData).map((task: any) => {
+        const mergedTasks: TaskData[] = Object.values(tasksData).map((task) => {
           const submission = latestSubmissions[task.id];
+          if (!submission) return task;
 
-          if (submission) {
-            const completedTime = submission.timestamp?.toDate();
-            const timeString = completedTime
-              ? completedTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-              : 'N/A';
+          const completedTime = submission.timestamp?.toDate();
+          const timeString = completedTime
+            ? completedTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            : 'N/A';
 
-            return {
-              ...task,
-              status: 'completed' as 'completed' | 'pending',
-              completedBy: submission.employeeName || 'Unknown',
-              completedAt: timeString,
-            };
-          }
-
-          return task;
+          return {
+            ...task,
+            status: 'completed',
+            completedBy: submission.employeeName || 'Unknown',
+            completedAt: timeString,
+          };
         });
 
-        setTasks(mergedTasks);
-      } catch (error) {
-        console.error('Error fetching tasks:', error);
+        if (!cancelled) setTasks(mergedTasks);
+      } catch (err) {
+        console.error('Error fetching tasks:', err);
+        if (!cancelled) setError('Failed to load store tasks. Please try again later.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchTasksAndSubmissions();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filteredTasks = selectedStation === 'all'
@@ -157,9 +176,11 @@ export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
         {loading ? (
-          <div className="flex justify-center items-center py-12">
+          <div className="flex justify-center items-center py-12" role="status" aria-label="Loading store tasks">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
+        ) : error ? (
+          <div className="text-center py-12 text-red-600">{error}</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -260,6 +281,9 @@ export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {!loading && openingTasks.length === 0 && (
+                  <p className="text-center py-8 text-gray-500">No opening tasks found</p>
+                )}
                 <div className="space-y-3">
                   {openingTasks.map((task, index) => (
                     <motion.div
@@ -314,6 +338,9 @@ export function OwnerStorePage({ onBack, onLogout }: OwnerStorePageProps) {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {!loading && closingTasks.length === 0 && (
+                  <p className="text-center py-8 text-gray-500">No closing tasks found</p>
+                )}
                 <div className="space-y-3">
                   {closingTasks.map((task, index) => (
                     <motion.div

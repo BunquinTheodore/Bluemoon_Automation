@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -23,31 +23,60 @@ interface PayrollEntry {
   period: string;
 }
 
+/** Coerce a Firestore value to a finite number (guards NaN/undefined in currency math). */
+const toAmount = (value: unknown): number => {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatCurrency = (amount: number): string =>
+  toAmount(amount).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+/** Week period label, matching the format written by the manager payroll flow (e.g. "Nov 18-24, 2025"). */
+const getCurrentWeekPeriod = (): string => {
+  const today = new Date();
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  return `${startOfWeek.toLocaleDateString('en-US', { month: 'short' })} ${startOfWeek.getDate()}-${endOfWeek.getDate()}, ${endOfWeek.getFullYear()}`;
+};
+
 export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
   const [payrollEntries, setPayrollEntries] = useState<PayrollEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Fetch payroll from Firestore
   useEffect(() => {
     const q = query(collection(db, 'payroll'), orderBy('submittedAt', 'desc'));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedPayroll: PayrollEntry[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          employeeName: data.employeeName || '',
-          employeeStatus: data.employeeStatus || 'full-time',
-          daysWorked: data.daysWorked || 0,
-          payRate: data.payRate || 0,
-          totalPay: data.totalPay || 0,
-          period: data.period || 'N/A',
-        };
-      });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const loadedPayroll: PayrollEntry[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            employeeName: data.employeeName || '',
+            employeeStatus: data.employeeStatus || 'full-time',
+            daysWorked: toAmount(data.daysWorked),
+            payRate: toAmount(data.payRate),
+            totalPay: toAmount(data.totalPay),
+            period: data.period || 'N/A',
+          };
+        });
 
-      setPayrollEntries(loadedPayroll);
-      setLoading(false);
-    });
+        setPayrollEntries(loadedPayroll);
+        setLoadError(null);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Failed to load payroll records:', error);
+        setLoadError('Failed to load payroll records. Please try again later.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -55,19 +84,13 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
   // Calculate statistics
   const totalPayroll = payrollEntries.reduce((sum, entry) => sum + entry.totalPay, 0);
 
-  // Get current week period string
-  const today = new Date();
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-  const currentWeekPeriod = `${startOfWeek.toLocaleDateString('en-US', { month: 'short' })} ${startOfWeek.getDate()}-${endOfWeek.getDate()}, ${endOfWeek.getFullYear()}`;
+  const currentWeekPeriod = useMemo(getCurrentWeekPeriod, []);
 
   const currentWeekPayroll = payrollEntries
-    .filter(e => e.period === currentWeekPeriod)
+    .filter((e) => e.period === currentWeekPeriod)
     .reduce((sum, entry) => sum + entry.totalPay, 0);
 
-  const totalEmployees = new Set(payrollEntries.map(e => e.employeeName)).size;
+  const totalEmployees = new Set(payrollEntries.map((e) => e.employeeName).filter(Boolean)).size;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -76,7 +99,7 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button variant="ghost" size="icon" onClick={onBack} aria-label="Back">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div className="flex items-center gap-3">
@@ -109,6 +132,12 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
           </div>
         ) : (
           <>
+        {loadError && (
+          <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
+
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -117,7 +146,7 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Current Week Total</p>
-                    <p className="text-2xl text-green-700">₱{currentWeekPayroll.toLocaleString()}</p>
+                    <p className="text-2xl text-green-700">₱{formatCurrency(currentWeekPayroll)}</p>
                   </div>
                   <DollarSign className="w-8 h-8 text-green-600" />
                 </div>
@@ -131,7 +160,7 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">All-Time Total</p>
-                    <p className="text-2xl text-amber-700">₱{totalPayroll.toLocaleString()}</p>
+                    <p className="text-2xl text-amber-700">₱{formatCurrency(totalPayroll)}</p>
                   </div>
                   <Receipt className="w-8 h-8 text-amber-600" />
                 </div>
@@ -174,7 +203,14 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payrollEntries.map((entry, index) => (
+                  {payrollEntries.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                        No payroll records yet
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {payrollEntries.map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell>{entry.employeeName}</TableCell>
                       <TableCell>
@@ -183,9 +219,9 @@ export function OwnerPayrollPage({ onBack, onLogout }: OwnerPayrollPageProps) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-center">{entry.daysWorked}</TableCell>
-                      <TableCell className="text-center">₱{entry.payRate.toLocaleString()}</TableCell>
+                      <TableCell className="text-center">₱{formatCurrency(entry.payRate)}</TableCell>
                       <TableCell className="text-center text-green-700">
-                        ₱{entry.totalPay.toLocaleString()}
+                        ₱{formatCurrency(entry.totalPay)}
                       </TableCell>
                       <TableCell className="text-sm text-gray-500">{entry.period}</TableCell>
                     </TableRow>

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { signOut } from 'firebase/auth';
+import { auth } from './lib/firebase';
 import { LoginScreen } from './components/LoginScreen';
 import { OwnerDashboard } from './components/OwnerDashboard';
 import { ManagerDashboard } from './components/ManagerDashboard';
@@ -21,6 +23,9 @@ import { OwnerManagerTasksPage } from './components/OwnerManagerTasksPage';
 import { OwnerProductsPage } from './components/OwnerProductsPage';
 import { PhotoViewerPage } from './components/PhotoViewerPage';
 import { FinancialReportPhotosPage } from './components/FinancialReportPhotosPage';
+import { TeamCupInventoryPage } from './components/TeamCupInventoryPage';
+import { ManagerCupInventoryPage } from './components/ManagerCupInventoryPage';
+import { OwnerCupInventoryPage } from './components/OwnerCupInventoryPage';
 import { Toaster } from './components/ui/sonner';
 
 export type UserRole = 'owner' | 'manager' | 'employee';
@@ -30,6 +35,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  branch?: string;
 }
 
 export interface Task {
@@ -141,6 +147,16 @@ export interface ProductIngredient {
   unit: string;
 }
 
+/** Minimal shape of a financial report needed by the photo viewer screen. */
+export interface FinancialReportSummary {
+  id: string;
+  date: string;
+  opening?: { imageUrl?: string };
+  closing?: { imageUrl?: string };
+  managerFund?: { imageUrl?: string };
+  [key: string]: unknown;
+}
+
 export type Screen =
   | 'login'
   | 'owner-dashboard'
@@ -169,7 +185,10 @@ export type Screen =
   | 'manager-payroll'
   | 'manager-employees'
   | 'photo-viewer'
-  | 'financial-report-photos';
+  | 'financial-report-photos'
+  | 'team-cup-inventory'
+  | 'manager-cup-inventory'
+  | 'owner-cup-inventory';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('login');
@@ -177,7 +196,7 @@ function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedTaskForScan, setSelectedTaskForScan] = useState<Task | null>(null);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  const [selectedFinancialReport, setSelectedFinancialReport] = useState<any>(null);
+  const [selectedFinancialReport, setSelectedFinancialReport] = useState<FinancialReportSummary | null>(null);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -191,15 +210,20 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Clear local state immediately so the UI never shows a stale session,
+    // then end the Firebase session in the background.
     setCurrentUser(null);
     setCurrentScreen('login');
     setSelectedTask(null);
     setSelectedTaskForScan(null);
     setSelectedRecipe(null);
     setSelectedFinancialReport(null);
+    signOut(auth).catch((error: unknown) => {
+      console.error('Failed to sign out of Firebase:', error);
+    });
   };
 
-  const navigateTo = (screen: Screen, task?: Task, recipe?: Recipe, financialReport?: any) => {
+  const navigateTo = (screen: Screen, task?: Task, recipe?: Recipe, financialReport?: FinancialReportSummary) => {
     if (screen === 'task-detail' && task) {
       setSelectedTask(task);
     }
@@ -215,37 +239,57 @@ function App() {
     setCurrentScreen(screen);
   };
 
+  const dashboardFor = (role: UserRole): Screen =>
+    role === 'owner' ? 'owner-dashboard' : role === 'manager' ? 'manager-dashboard' : 'employee-dashboard';
+
   const renderScreen = () => {
+    // Auth gate: every screen other than login requires a signed-in user.
+    if (currentScreen === 'login' || !currentUser) {
+      return <LoginScreen onLogin={handleLogin} />;
+    }
+
+    // Detail screens need their selection; fall back to the user's dashboard if it is missing.
+    if (
+      (currentScreen === 'task-detail' && !selectedTask) ||
+      (currentScreen === 'qr-scan' && !selectedTaskForScan) ||
+      (currentScreen === 'recipe-detail' && !selectedRecipe) ||
+      (currentScreen === 'financial-report-photos' && !selectedFinancialReport)
+    ) {
+      const fallback = dashboardFor(currentUser.role);
+      if (currentScreen !== fallback) {
+        setCurrentScreen(fallback);
+      }
+      return null;
+    }
+
     switch (currentScreen) {
-      case 'login':
-        return <LoginScreen onLogin={handleLogin} />;
       case 'owner-dashboard':
         return (
-          <OwnerDashboard 
-            user={currentUser!} 
+          <OwnerDashboard
+            user={currentUser}
             onNavigate={navigateTo}
             onLogout={handleLogout}
           />
         );
       case 'manager-dashboard':
         return (
-          <ManagerDashboard 
-            user={currentUser!} 
+          <ManagerDashboard
+            user={currentUser}
             onNavigate={navigateTo}
             onLogout={handleLogout}
           />
         );
       case 'employee-dashboard':
         return (
-          <EmployeeDashboard 
-            user={currentUser!} 
+          <EmployeeDashboard
+            user={currentUser}
             onNavigate={navigateTo}
             onLogout={handleLogout}
           />
         );
       case 'calendar':
         return (
-          <TaskCalendar 
+          <TaskCalendar
             onNavigate={navigateTo}
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
@@ -253,30 +297,30 @@ function App() {
         );
       case 'task-detail':
         return (
-          <TaskDetailPage 
+          <TaskDetailPage
             task={selectedTask!}
             onBack={() => navigateTo('owner-dashboard')}
           />
         );
       case 'qr-scan':
         return (
-          <QRScanScreen 
+          <QRScanScreen
             task={selectedTaskForScan!}
-            employee={currentUser!}
+            employee={currentUser}
             onBack={() => navigateTo('employee-dashboard')}
             onComplete={() => navigateTo('employee-dashboard')}
           />
         );
       case 'task-history':
         return (
-          <EmployeeTaskHistory 
-            employee={currentUser!}
+          <EmployeeTaskHistory
+            employee={currentUser}
             onBack={() => navigateTo('employee-dashboard')}
           />
         );
       case 'notifications':
         return (
-          <NotificationsPage 
+          <NotificationsPage
             onBack={() => navigateTo('owner-dashboard')}
             onNavigate={navigateTo}
             onLogout={handleLogout}
@@ -284,13 +328,13 @@ function App() {
         );
       case 'settings':
         return (
-          <SettingsPage 
+          <SettingsPage
             onBack={() => navigateTo('owner-dashboard')}
           />
         );
       case 'recipes-list':
         return (
-          <RecipesListPage 
+          <RecipesListPage
             onNavigate={navigateTo}
             onLogout={handleLogout}
             onBack={() => navigateTo('employee-dashboard')}
@@ -298,7 +342,7 @@ function App() {
         );
       case 'recipe-detail':
         return (
-          <RecipeDetailPage 
+          <RecipeDetailPage
             recipe={selectedRecipe!}
             onBack={() => navigateTo('recipes-list')}
             onLogout={handleLogout}
@@ -306,7 +350,7 @@ function App() {
         );
       case 'owner-store':
         return (
-          <OwnerStorePage 
+          <OwnerStorePage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
@@ -321,28 +365,28 @@ function App() {
         );
       case 'owner-inventory':
         return (
-          <OwnerInventoryPage 
+          <OwnerInventoryPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
         );
       case 'owner-requests':
         return (
-          <OwnerRequestsPage 
+          <OwnerRequestsPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
         );
       case 'owner-payroll':
         return (
-          <OwnerPayrollPage 
+          <OwnerPayrollPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
         );
       case 'owner-employees':
         return (
-          <OwnerEmployeesPage 
+          <OwnerEmployeesPage
             onBack={() => navigateTo('owner-dashboard')}
             onLogout={handleLogout}
           />
@@ -365,7 +409,7 @@ function App() {
         return (
           <PhotoViewerPage
             onNavigate={navigateTo}
-            isOwner={currentUser?.role === 'owner'}
+            isOwner={currentUser.role === 'owner'}
           />
         );
       case 'financial-report-photos':
@@ -373,6 +417,29 @@ function App() {
           <FinancialReportPhotosPage
             reportData={selectedFinancialReport!}
             onBack={() => navigateTo('owner-sales')}
+          />
+        );
+      case 'team-cup-inventory':
+        return (
+          <TeamCupInventoryPage
+            user={currentUser}
+            onBack={() => navigateTo('employee-dashboard')}
+            onLogout={handleLogout}
+          />
+        );
+      case 'manager-cup-inventory':
+        return (
+          <ManagerCupInventoryPage
+            user={currentUser}
+            onBack={() => navigateTo('manager-dashboard')}
+            onLogout={handleLogout}
+          />
+        );
+      case 'owner-cup-inventory':
+        return (
+          <OwnerCupInventoryPage
+            onBack={() => navigateTo('owner-dashboard')}
+            onLogout={handleLogout}
           />
         );
       default:

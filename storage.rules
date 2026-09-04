@@ -1,34 +1,65 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    // Roles come from the trusted Firestore /users/{uid} document.
+    function getUserRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isStaff() {
+      return isAuthenticated() && (getUserRole() == 'owner' || getUserRole() == 'manager');
+    }
+
+    // Deletes carry no request.resource; uploads must be a bounded image/PDF.
+    function isDelete() {
+      return request.resource == null;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isPdf() {
+      return request.resource.contentType == 'application/pdf';
+    }
+
+    function underSizeMb(maxMb) {
+      return request.resource.size < maxMb * 1024 * 1024;
+    }
+
     match /taskSubmissions/{userId}/{submissionId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated()
+        && request.auth.uid == userId
+        && (isDelete() || (isImage() && underSizeMb(10)));
     }
-    
+
     match /financialReports/{reportId}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isStaff();
+      allow write: if isStaff()
+        && (isDelete() || ((isImage() || isPdf()) && underSizeMb(20)));
     }
-    
+
     match /inventory/{inventoryId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated()
+        && (isDelete() || (isImage() && underSizeMb(10)));
     }
-    
+
     match /recipes/{recipeId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isStaff()
+        && (isDelete() || ((isImage() || isPdf()) && underSizeMb(20)));
     }
-    
+
+    // Deny everything not explicitly matched above.
     match /{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read, write: if false;
     }
   }
 }

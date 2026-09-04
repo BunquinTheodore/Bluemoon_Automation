@@ -1,5 +1,10 @@
 import logo from 'figma:asset/3f9d5e2624d6f76604e00bccf7f947f633651625.png';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  type User as FirebaseUser,
+} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import { User, UserRole } from '../App';
@@ -13,83 +18,147 @@ interface LoginScreenProps {
   onLogin: (user: User) => void;
 }
 
+const VALID_ROLES: UserRole[] = ['owner', 'manager', 'employee'];
+
+/** Known account emails that map directly to a role when no Firestore profile exists. */
+const EMAIL_ROLE_MAP: Record<string, UserRole> = {
+  'bluemoon.owner.alangilan@gmail.com': 'owner',
+  'bluemoon.manager.alangilan@gmail.com': 'manager',
+  'bluemoon.team.alangilan@gmail.com': 'employee',
+};
+
+const NO_ROLE_MESSAGE =
+  'No role configured for this account. Please contact the administrator.';
+
+function isUserRole(value: unknown): value is UserRole {
+  return typeof value === 'string' && (VALID_ROLES as string[]).includes(value);
+}
+
+function getAuthErrorCode(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === 'string' ? code : '';
+  }
+  return '';
+}
+
+function mapAuthError(error: unknown, fallback: string): string {
+  switch (getAuthErrorCode(error)) {
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled. Please contact the administrator.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+    case 'auth/invalid-login-credentials':
+      return 'Incorrect email or password.';
+    case 'auth/too-many-requests':
+      return 'Too many failed attempts. Please wait a moment and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your connection and try again.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Sign-in cancelled.';
+    case 'auth/popup-blocked':
+      return 'Popup was blocked. Please enable popups for this site.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method.';
+    default:
+      return fallback;
+  }
+}
+
+/**
+ * Builds the app User from a Firebase user, reading role/branch from the
+ * `users/{uid}` profile. Falls back to the known-email role map when no
+ * profile exists. Returns null when no role can be determined.
+ */
+async function resolveAppUser(firebaseUser: FirebaseUser): Promise<User | null> {
+  const email = firebaseUser.email ?? '';
+  let role: UserRole | null = null;
+  let branch = '';
+
+  try {
+    const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+    if (userSnap.exists()) {
+      const data = userSnap.data() as { role?: unknown; branch?: unknown };
+      if (isUserRole(data.role)) role = data.role;
+      if (typeof data.branch === 'string') branch = data.branch;
+    }
+  } catch (firestoreError) {
+    console.error('Error fetching user profile from Firestore:', firestoreError);
+  }
+
+  if (!role) {
+    role = EMAIL_ROLE_MAP[email.toLowerCase()] ?? null;
+  }
+  if (!role) return null;
+
+  return {
+    id: firebaseUser.uid,
+    name: firebaseUser.displayName || (email ? email.split('@')[0] : 'User'),
+    email,
+    role,
+    branch,
+  };
+}
+
 export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isEmailLoading, setIsEmailLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const isBusy = isEmailLoading || isGoogleLoading;
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    let userRole: UserRole = 'employee';
-    if (email === 'bluemoon.owner.alangilan@gmail.com') {
-      userRole = 'owner';
-    } else if (email === 'bluemoon.manager.alangilan@gmail.com') {
-      userRole = 'manager';
-    } else if (email === 'bluemoon.team.alangilan@gmail.com') {
-      userRole = 'employee';
+    if (isBusy) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError('Please enter your email and password.');
+      return;
     }
 
-    const mockUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: email.split('@')[0],
-      email,
-      role: userRole,
-    };
-    onLogin(mockUser);
+    setIsEmailLoading(true);
+    setError(null);
+
+    try {
+      const result = await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      const appUser = await resolveAppUser(result.user);
+      if (!appUser) {
+        setError(NO_ROLE_MESSAGE);
+        return;
+      }
+      onLogin(appUser);
+    } catch (authError) {
+      console.error('Email sign-in error:', getAuthErrorCode(authError) || authError);
+      setError(mapAuthError(authError, 'Failed to sign in. Please try again.'));
+    } finally {
+      setIsEmailLoading(false);
+    }
   };
 
   const handleGoogleSignIn = async () => {
+    if (isBusy) return;
     setIsGoogleLoading(true);
     setError(null);
 
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      const firebaseUser = result.user;
-      let userRole: UserRole | null = null;
-
-      // Fetch role from Firestore based on the user's UID
-      try {
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const userSnap = await getDoc(userDocRef);
-
-        if (userSnap.exists()) {
-          const data = userSnap.data() as { role?: string };
-          if (data.role && ['owner', 'manager', 'employee'].includes(data.role)) {
-            userRole = data.role as UserRole;
-          }
-        }
-      } catch (firestoreError) {
-        console.error('Error fetching user role from Firestore:', firestoreError);
-      }
-
-      if (!userRole) {
-        setError('No role configured for this Google account. Please contact the administrator.');
+      const appUser = await resolveAppUser(result.user);
+      if (!appUser) {
+        setError(NO_ROLE_MESSAGE);
         return;
       }
-
-      const email = firebaseUser.email ?? '';
-
-      const mappedUser: User = {
-        id: firebaseUser.uid,
-        name:
-          firebaseUser.displayName || (email ? email.split('@')[0] : 'User'),
-        email,
-        role: userRole,
-      };
-
-      onLogin(mappedUser);
-    } catch (error: any) {
-      console.error('Google sign-in error:', error);
-
-      if (error.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in cancelled');
-      } else if (error.code === 'auth/popup-blocked') {
-        setError('Popup was blocked. Please enable popups for this site.');
-      } else {
-        setError('Failed to sign in with Google. Please try again.');
-      }
+      onLogin(appUser);
+    } catch (authError) {
+      console.error('Google sign-in error:', getAuthErrorCode(authError) || authError);
+      setError(mapAuthError(authError, 'Failed to sign in with Google. Please try again.'));
     } finally {
       setIsGoogleLoading(false);
     }
@@ -108,15 +177,17 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             <CardTitle className="text-center">Login to your account</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4" noValidate>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="Enter your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={isBusy}
                   required
                 />
               </div>
@@ -125,14 +196,20 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                 <Input
                   id="password"
                   type="password"
+                  autoComplete="current-password"
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={isBusy}
                   required
                 />
               </div>
-              <Button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700">
-                Sign In
+              <Button
+                type="submit"
+                disabled={isBusy}
+                className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isEmailLoading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
 
@@ -148,7 +225,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               <Button
                 type="button"
                 onClick={handleGoogleSignIn}
-                disabled={isGoogleLoading}
+                disabled={isBusy}
                 className="w-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <span className="inline-flex h-5 w-5 items-center justify-center">
@@ -156,6 +233,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 48 48"
                     className="h-5 w-5"
+                    aria-hidden="true"
                   >
                     <path
                       fill="#EA4335"
@@ -180,7 +258,9 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                 </span>
               </Button>
               {error && (
-                <p className="mt-2 text-xs text-red-500 text-center">{error}</p>
+                <p role="alert" className="mt-2 text-xs text-red-500 text-center">
+                  {error}
+                </p>
               )}
             </div>
           </CardContent>

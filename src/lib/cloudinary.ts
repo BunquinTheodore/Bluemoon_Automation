@@ -2,6 +2,16 @@
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dtzxxwzpj';
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'bluemoon_unsigned';
 
+interface CloudinaryUploadResponse {
+  url: string;
+  public_id: string;
+  secure_url: string;
+  format: string;
+  width: number;
+  height: number;
+  created_at: string;
+}
+
 export interface CloudinaryUploadResult {
   url: string;
   publicId: string;
@@ -22,6 +32,11 @@ export async function uploadImageToCloudinary(
   file: File,
   folder?: string
 ): Promise<CloudinaryUploadResult> {
+  const validation = validateImageFile(file);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -31,8 +46,6 @@ export async function uploadImageToCloudinary(
       formData.append('folder', folder);
     }
 
-    // Add timestamp and tags for better organization
-    formData.append('timestamp', Date.now().toString());
     formData.append('tags', 'bluemoon,automation');
 
     const response = await fetch(
@@ -44,11 +57,20 @@ export async function uploadImageToCloudinary(
     );
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'Failed to upload image to Cloudinary');
+      let message = `Failed to upload image (HTTP ${response.status})`;
+      try {
+        const errorData = (await response.json()) as { error?: { message?: string } };
+        if (errorData.error?.message) message = errorData.error.message;
+      } catch {
+        // Non-JSON error body; keep the generic message
+      }
+      throw new Error(message);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as CloudinaryUploadResponse;
+    if (!data.secure_url || !data.public_id) {
+      throw new Error('Cloudinary returned an incomplete upload response');
+    }
 
     return {
       url: data.url,
@@ -94,7 +116,7 @@ export function getOptimizedImageUrl(
     format?: string;
   }
 ): string {
-  const transformations = [];
+  const transformations: string[] = [];
 
   if (options?.width) transformations.push(`w_${options.width}`);
   if (options?.height) transformations.push(`h_${options.height}`);
@@ -114,9 +136,12 @@ export function getOptimizedImageUrl(
  * @returns File object
  */
 export function base64ToFile(dataUrl: string, filename: string): File {
-  const arr = dataUrl.split(',');
-  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-  const bstr = atob(arr[1]);
+  const [header, payload] = dataUrl.split(',');
+  if (!payload) {
+    throw new Error('Invalid data URL');
+  }
+  const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+  const bstr = atob(payload);
   let n = bstr.length;
   const u8arr = new Uint8Array(n);
   while (n--) {
@@ -133,6 +158,10 @@ export function base64ToFile(dataUrl: string, filename: string): File {
 export function validateImageFile(file: File): { valid: boolean; error?: string } {
   const MAX_SIZE = 10 * 1024 * 1024; // 10MB
   const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+  if (!file || file.size === 0) {
+    return { valid: false, error: 'The selected file is empty' };
+  }
 
   if (!ALLOWED_TYPES.includes(file.type)) {
     return { valid: false, error: 'Please use JPEG, PNG, or WebP format' };

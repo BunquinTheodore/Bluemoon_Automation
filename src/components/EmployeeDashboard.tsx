@@ -1,13 +1,14 @@
 import logo from 'figma:asset/2ea8e337c311dd84e6a339fac104593b92115d60.png';
-import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, DocumentData, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import {
-    Camera,
-    CheckCircle2,
-    ChefHat,
-    Coffee,
-    LogOut,
-    Package,
-    Plus
+  Camera,
+  CheckCircle2,
+  ChefHat,
+  ClipboardList,
+  LogOut,
+  Package,
+  Plus,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
@@ -43,16 +44,13 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
   const [selectedStation, setSelectedStation] = useState<'kitchen' | 'coffee-bar'>('kitchen');
   const [selectedCategory, setSelectedCategory] = useState<'opening' | 'closing'>('opening');
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const [submittingStation, setSubmittingStation] = useState<'kitchen' | 'coffee-bar' | null>(null);
+
+  const todayISO = () => new Date().toISOString().split('T')[0];
 
   // Inventory State
-  const [inventory, setInventory] = useState<InventoryItem[]>([
-    { id: '1', productName: 'Espresso Beans', unit: 'kg', sealed: 25, loose: 2, delivered: 27, dateDelivered: '2025-10-20', station: 'coffee-bar' },
-    { id: '2', productName: 'Whole Milk', unit: 'no. of package', sealed: 12, loose: 1, delivered: 13, dateDelivered: '2025-10-21', station: 'coffee-bar' },
-    { id: '3', productName: 'Vanilla Syrup', unit: 'bottle', sealed: 5, loose: 1, delivered: 6, dateDelivered: '2025-10-20', station: 'coffee-bar' },
-    { id: '4', productName: 'Rice', unit: 'kg', sealed: 50, loose: 5, delivered: 55, dateDelivered: '2025-10-21', station: 'kitchen' },
-    { id: '5', productName: 'Cooking Oil', unit: 'bottle', sealed: 8, loose: 2, delivered: 10, dateDelivered: '2025-10-20', station: 'kitchen' },
-    { id: '6', productName: 'Salt', unit: 'kg', sealed: 10, loose: 1, delivered: 11, dateDelivered: '2025-10-19', station: 'kitchen' },
-  ]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [newProductName, setNewProductName] = useState('');
   const [newProductUnit, setNewProductUnit] = useState('kg');
   const [newProductSealed, setNewProductSealed] = useState('');
@@ -65,7 +63,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
       collection(db, 'inventory'),
       (snapshot) => {
         const items: InventoryItem[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
+          const data: DocumentData = docSnap.data();
           const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
           const loose = typeof data.loose === 'number' ? data.loose : 0;
           const total = typeof data.total === 'number' ? data.total : sealed + loose;
@@ -76,7 +74,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
             sealed,
             loose,
             delivered: total,
-            dateDelivered: data.dateDelivered || new Date().toISOString().split('T')[0],
+            dateDelivered: data.dateDelivered || todayISO(),
             station: data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
           };
         });
@@ -87,40 +85,38 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
       }
     );
 
-    const fetchTasks = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'tasks'));
-        if (!snapshot.empty) {
-          const loadedTasks: Task[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data() as any;
-            const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
-            const category: 'opening' | 'closing' = data.category === 'closing' ? 'closing' : 'opening';
-            const status: 'pending' | 'completed' = data.status === 'completed' ? 'completed' : 'pending';
+    const unsubscribeTasks = onSnapshot(
+      collection(db, 'tasks'),
+      (snapshot) => {
+        const loadedTasks: Task[] = snapshot.docs.map((docSnap) => {
+          const data: DocumentData = docSnap.data();
+          const station: 'kitchen' | 'coffee-bar' = data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen';
+          const category: 'opening' | 'closing' = data.category === 'closing' ? 'closing' : 'opening';
+          const status: 'pending' | 'completed' = data.status === 'completed' ? 'completed' : 'pending';
 
-            return {
-              id: data.taskId || docSnap.id,
-              name: data.name || '',
-              qrCodeId: data.qrCodeId || '',
-              description: data.description || '',
-              station,
-              category,
-              status,
-            };
-          });
-          setTasks(loadedTasks);
-        } else {
-          setTasks([]);
-        }
-      } catch (error) {
+          return {
+            id: data.taskId || docSnap.id,
+            name: data.name || '',
+            qrCodeId: data.qrCodeId || '',
+            description: data.description || '',
+            station,
+            category,
+            status,
+          };
+        });
+        setTasks(loadedTasks);
+        setTasksLoading(false);
+      },
+      (error) => {
         console.error('Error loading tasks from Firestore', error);
+        toast.error('Failed to load tasks');
+        setTasksLoading(false);
       }
-    };
+    );
 
-    fetchTasks();
-
-    // Cleanup function
     return () => {
       unsubscribeInventory();
+      unsubscribeTasks();
     };
   }, []);
 
@@ -161,16 +157,16 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
 
     const newItem: InventoryItem = {
       id: Date.now().toString(),
-      productName: newProductName,
+      productName: newProductName.trim(),
       unit: newProductUnit,
       sealed,
       loose,
       delivered,
-      dateDelivered: new Date().toISOString().split('T')[0],
+      dateDelivered: todayISO(),
       station: inventoryStation,
     };
 
-    setInventory([...inventory, newItem]);
+    setInventory((prev) => [...prev, newItem]);
     toast.success('Product added to inventory');
     setNewProductName('');
     setNewProductSealed('');
@@ -178,7 +174,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
   };
 
   const handleUpdateInventory = (id: string, field: 'sealed' | 'loose', value: string) => {
-    setInventory(inventory.map(item => {
+    setInventory((prev) => prev.map(item => {
       if (item.id === id) {
         const numericValue = Number(value);
 
@@ -194,16 +190,20 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
 
         const updatedItem = { ...item, [field]: numericValue };
         updatedItem.delivered = updatedItem.sealed + updatedItem.loose;
-        updatedItem.dateDelivered = new Date().toISOString().split('T')[0];
+        updatedItem.dateDelivered = todayISO();
         return updatedItem;
       }
       return item;
     }));
   };
 
-
+  const formatDate = (value: string) => {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString();
+  };
 
   const handleSubmitInventory = async (station: 'kitchen' | 'coffee-bar') => {
+    if (submittingStation) return;
     try {
       const itemsForStation = inventory.filter(item => item.station === station);
 
@@ -212,10 +212,11 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
         return;
       }
 
+      setSubmittingStation(station);
       const writes = itemsForStation.map(async (item) => {
         const invRef = doc(collection(db, 'inventory'), item.id);
         const total = item.sealed + item.loose;
-        const dateDelivered = item.dateDelivered || new Date().toISOString().split('T')[0];
+        const dateDelivered = item.dateDelivered || todayISO();
 
         await setDoc(invRef, {
           inventoryId: item.id,
@@ -251,11 +252,13 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
     } catch (error) {
       console.error('Error submitting inventory', error);
       toast.error('Failed to submit inventory. Please try again.');
+    } finally {
+      setSubmittingStation(null);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
+    <div className="min-h-screen bg-linear-to-br from-cyan-50 via-white to-cyan-50">
       {/* Header */}
       <header className="bg-white border-b border-cyan-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -265,16 +268,21 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
             </div>
             <div className="flex items-center gap-3">
               <Button
+                type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => onNavigate('recipes-list')}
-                title="Recipes"
+                onClick={() => onNavigate('team-cup-inventory')}
+                aria-label="Cup Inventory Tracking"
+                className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                title="Cup Inventory Tracking"
               >
-                <Coffee className="w-5 h-5 text-cyan-600" />
+                <ClipboardList className="w-5 h-5" />
               </Button>
               <Button
+                type="button"
                 variant="ghost"
                 onClick={onLogout}
+                aria-label="Logout"
                 className="text-gray-700 hover:text-red-600 hover:bg-red-50"
                 title="Logout"
               >
@@ -313,14 +321,14 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
           {/* Tasks Tab */}
           <TabsContent value="tasks">
             {/* Station Tabs */}
-            <Tabs value={selectedStation} onValueChange={(value: any) => setSelectedStation(value)} className="space-y-6">
+            <Tabs value={selectedStation} onValueChange={(value) => setSelectedStation(value === 'coffee-bar' ? 'coffee-bar' : 'kitchen')} className="space-y-6">
               <TabsList className="grid w-full grid-cols-2 bg-cyan-100">
                 <TabsTrigger value="kitchen" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
                   <ChefHat className="w-4 h-4 mr-2" />
                   Kitchen
                 </TabsTrigger>
                 <TabsTrigger value="coffee-bar" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
-                  <Coffee className="w-4 h-4 mr-2" />
+                  <ChefHat className="w-4 h-4 mr-2" />
                   Coffee Bar
                 </TabsTrigger>
               </TabsList>
@@ -357,6 +365,15 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
+                      {tasksLoading && (
+                        <div className="flex items-center justify-center py-8 text-gray-500 gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Loading tasks...
+                        </div>
+                      )}
+                      {!tasksLoading && filteredTasks.length === 0 && (
+                        <p className="text-center text-sm text-gray-500 py-8">No tasks for this station and category.</p>
+                      )}
                       {filteredTasks.map((task, index) => (
                         <motion.div
                           key={task.id}
@@ -371,9 +388,9 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                         >
                           <div className="flex items-center gap-3 flex-1">
                             {task.status === 'completed' ? (
-                              <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+                              <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
                             ) : (
-                              <div className="w-5 h-5 border-2 border-gray-300 rounded-full flex-shrink-0" />
+                              <div className="w-5 h-5 border-2 border-gray-300 rounded-full shrink-0" />
                             )}
                             <div>
                               <p className={`${task.status === 'completed' ? 'text-green-700 line-through' : 'text-gray-900'}`}>
@@ -387,6 +404,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                               size="sm"
                               onClick={() => handleScanQR(task)}
                               className="bg-cyan-600 hover:bg-cyan-700"
+                              aria-label={`Complete ${task.name}`}
                             >
                               <Camera className="w-4 h-4" />
                             </Button>
@@ -421,7 +439,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                 <Card className="border-cyan-100">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Coffee className="w-5 h-5 text-cyan-600" />
+                      <ChefHat className="w-5 h-5 text-cyan-600" />
                       {selectedCategory === 'opening' ? 'Opening' : 'Closing'} Tasks
                     </CardTitle>
                     <CardDescription>
@@ -430,6 +448,15 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
+                      {tasksLoading && (
+                        <div className="flex items-center justify-center py-8 text-gray-500 gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Loading tasks...
+                        </div>
+                      )}
+                      {!tasksLoading && filteredTasks.length === 0 && (
+                        <p className="text-center text-sm text-gray-500 py-8">No tasks for this station and category.</p>
+                      )}
                       {filteredTasks.map((task, index) => (
                         <motion.div
                           key={task.id}
@@ -444,9 +471,9 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                         >
                           <div className="flex items-center gap-3 flex-1">
                             {task.status === 'completed' ? (
-                              <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+                              <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
                             ) : (
-                              <div className="w-5 h-5 border-2 border-gray-300 rounded-full flex-shrink-0" />
+                              <div className="w-5 h-5 border-2 border-gray-300 rounded-full shrink-0" />
                             )}
                             <div>
                               <p className={`${task.status === 'completed' ? 'text-green-700 line-through' : 'text-gray-900'}`}>
@@ -460,6 +487,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                               size="sm"
                               onClick={() => handleScanQR(task)}
                               className="bg-cyan-600 hover:bg-cyan-700"
+                              aria-label={`Complete ${task.name}`}
                             >
                               <Camera className="w-4 h-4" />
                             </Button>
@@ -475,14 +503,14 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
 
           {/* Inventory Tab */}
           <TabsContent value="inventory">
-            <Tabs value={inventoryStation} onValueChange={(value: any) => setInventoryStation(value)} className="space-y-6">
+            <Tabs value={inventoryStation} onValueChange={(value) => setInventoryStation(value === 'coffee-bar' ? 'coffee-bar' : 'kitchen')} className="space-y-6">
               <TabsList className="grid w-full grid-cols-2 bg-cyan-100">
                 <TabsTrigger value="kitchen" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
                   <ChefHat className="w-4 h-4 mr-2" />
                   Kitchen
                 </TabsTrigger>
                 <TabsTrigger value="coffee-bar" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
-                  <Coffee className="w-4 h-4 mr-2" />
+                  <ChefHat className="w-4 h-4 mr-2" />
                   Coffee Bar
                 </TabsTrigger>
               </TabsList>
@@ -534,7 +562,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                         value={newProductLoose}
                         onChange={(e) => setNewProductLoose(e.target.value)}
                       />
-                      <Button onClick={handleAddInventoryItem} className="bg-cyan-600 hover:bg-cyan-700">
+                      <Button type="button" onClick={handleAddInventoryItem} className="bg-cyan-600 hover:bg-cyan-700" aria-label="Add product">
                         <Plus className="w-4 h-4" />
                       </Button>
                     </div>
@@ -553,6 +581,11 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {inventory.filter(item => item.station === 'kitchen' && item.productName.trim().length > 0).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-sm text-gray-500 py-6">No products yet. Add one above.</TableCell>
+                            </TableRow>
+                          )}
                           {inventory
                             .filter(item => item.station === 'kitchen')
                             .filter(item => item.productName && item.productName.trim().length > 0)
@@ -580,7 +613,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                                 <span className="text-gray-700">{item.delivered}</span>
                               </TableCell>
                               <TableCell className="text-sm text-gray-500">
-                                {new Date(item.dateDelivered).toLocaleDateString()}
+                                {formatDate(item.dateDelivered)}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -588,8 +621,8 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Table>
                     </div>
 
-                    <Button onClick={() => handleSubmitInventory('kitchen')} className="w-full bg-cyan-600 hover:bg-cyan-700">
-                      Submit Kitchen Inventory to Manager
+                    <Button type="button" onClick={() => handleSubmitInventory('kitchen')} disabled={submittingStation !== null} className="w-full bg-cyan-600 hover:bg-cyan-700">
+                      {submittingStation === 'kitchen' ? 'Submitting...' : 'Submit Kitchen Inventory to Manager'}
                     </Button>
                   </CardContent>
                 </Card>
@@ -600,7 +633,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                 <Card className="border-cyan-100">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Coffee className="w-5 h-5 text-cyan-600" />
+                      <ChefHat className="w-5 h-5 text-cyan-600" />
                       Coffee Bar Inventory
                     </CardTitle>
                     <CardDescription>Input and track coffee bar inventory quantities</CardDescription>
@@ -642,7 +675,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                         value={newProductLoose}
                         onChange={(e) => setNewProductLoose(e.target.value)}
                       />
-                      <Button onClick={handleAddInventoryItem} className="bg-cyan-600 hover:bg-cyan-700">
+                      <Button type="button" onClick={handleAddInventoryItem} className="bg-cyan-600 hover:bg-cyan-700" aria-label="Add product">
                         <Plus className="w-4 h-4" />
                       </Button>
                     </div>
@@ -661,6 +694,11 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {inventory.filter(item => item.station === 'coffee-bar' && item.productName.trim().length > 0).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-sm text-gray-500 py-6">No products yet. Add one above.</TableCell>
+                            </TableRow>
+                          )}
                           {inventory
                             .filter(item => item.station === 'coffee-bar')
                             .filter(item => item.productName && item.productName.trim().length > 0)
@@ -688,7 +726,7 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                                 <span className="text-gray-700">{item.delivered}</span>
                               </TableCell>
                               <TableCell className="text-sm text-gray-500">
-                                {new Date(item.dateDelivered).toLocaleDateString()}
+                                {formatDate(item.dateDelivered)}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -696,8 +734,8 @@ export function EmployeeDashboard({ user, onNavigate, onLogout }: EmployeeDashbo
                       </Table>
                     </div>
 
-                    <Button onClick={() => handleSubmitInventory('coffee-bar')} className="w-full bg-cyan-600 hover:bg-cyan-700">
-                      Submit Coffee Bar Inventory to Manager
+                    <Button type="button" onClick={() => handleSubmitInventory('coffee-bar')} disabled={submittingStation !== null} className="w-full bg-cyan-600 hover:bg-cyan-700">
+                      {submittingStation === 'coffee-bar' ? 'Submitting...' : 'Submit Coffee Bar Inventory to Manager'}
                     </Button>
                   </CardContent>
                 </Card>

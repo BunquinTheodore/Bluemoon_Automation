@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Calendar, Clock, User, MapPin, ChefHat, Coffee } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -95,8 +95,13 @@ const mockPhotoSubmissions: PhotoSubmission[] = [
   },
 ];
 
+type StationFilter = 'all' | 'kitchen' | 'coffee-bar';
+
+const isStationFilter = (value: string): value is StationFilter =>
+  value === 'all' || value === 'kitchen' || value === 'coffee-bar';
+
 export function PhotoViewerModal({ open, onOpenChange, isOwner = false }: PhotoViewerModalProps) {
-  const [selectedStation, setSelectedStation] = useState<'all' | 'kitchen' | 'coffee-bar'>('all');
+  const [selectedStation, setSelectedStation] = useState<StationFilter>('all');
 
   const filteredPhotos = selectedStation === 'all' 
     ? mockPhotoSubmissions 
@@ -118,7 +123,7 @@ export function PhotoViewerModal({ open, onOpenChange, isOwner = false }: PhotoV
         </DialogHeader>
 
         <div className="px-6 py-4">
-          <Tabs value={selectedStation} onValueChange={(v: any) => setSelectedStation(v)}>
+          <Tabs value={selectedStation} onValueChange={(v) => { if (isStationFilter(v)) setSelectedStation(v); }}>
             <TabsList className="grid w-full grid-cols-3 bg-cyan-100">
               <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
                 All Stations
@@ -150,6 +155,7 @@ export function PhotoViewerModal({ open, onOpenChange, isOwner = false }: PhotoV
                       src={photo.imageUrl}
                       alt={photo.taskName}
                       className="w-full h-full object-cover"
+                      loading="lazy"
                     />
                     {photo.verified && (
                       <Badge className="absolute top-2 right-2 bg-green-600">

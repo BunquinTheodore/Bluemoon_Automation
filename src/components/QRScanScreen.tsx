@@ -1,6 +1,6 @@
 import { Camera, CheckCircle2, RotateCcw, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { collection, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Task, User } from '../App';
@@ -25,36 +25,63 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
   const [fileObject, setFileObject] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const readerRef = useRef<FileReader | null>(null);
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Abort any in-flight file read and pending navigation timer on unmount.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      readerRef.current?.abort();
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
 
   const handleCapture = () => {
-    // In a real app, this would open the device camera
-    // For demo purposes, we'll trigger a file input with camera capture
+    // Opens the device camera via the file input's capture attribute.
     fileInputRef.current?.click();
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // Validate file
-      const validation = validateImageFile(file);
-      if (!validation.valid) {
-        toast.error(validation.error);
-        return;
-      }
+    // Reset so selecting the same file again still fires onChange.
+    e.target.value = '';
+    if (!file) return;
 
-      setFileObject(file);
-      setUploadError(''); // Clear previous errors
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCapturedImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error ?? 'Invalid image file');
+      return;
     }
+
+    setFileObject(file);
+    setUploadError('');
+
+    readerRef.current?.abort();
+    const reader = new FileReader();
+    readerRef.current = reader;
+    reader.onload = () => {
+      if (isMountedRef.current && typeof reader.result === 'string') {
+        setCapturedImage(reader.result);
+      }
+    };
+    reader.onerror = () => {
+      console.error('Failed to read captured image:', reader.error);
+      if (isMountedRef.current) {
+        toast.error('Could not read the selected photo. Please try again.');
+        setFileObject(null);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleRetake = () => {
     setCapturedImage(null);
+    setFileObject(null);
     setConfirmName('');
+    setUploadError('');
   };
 
   const handleSubmit = async () => {
@@ -68,6 +95,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
       return;
     }
 
+    if (isSubmitting) return;
     setIsSubmitting(true);
     setUploadError('');
 
@@ -83,7 +111,11 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
       const submissionDocRef = doc(submissionsCollection);
 
       const now = new Date();
-      const dateStr = now.toISOString().split('T')[0];
+      const dateStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0'),
+      ].join('-');
 
       await setDoc(submissionDocRef, {
         submissionId: submissionDocRef.id,
@@ -92,8 +124,8 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
         employeeId: employee.id,
         employeeName: employee.name,
         confirmedName: confirmName.trim(),
-        station: task.station,
-        category: task.category,
+        station: task.station ?? null,
+        category: task.category ?? null,
         photoUrl: uploadResult.secureUrl,
         photoPath: uploadResult.publicId,
         qrCodeId: task.qrCodeId,
@@ -113,18 +145,19 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
       // 4. Success feedback
       const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       toast.success('Task completed successfully!', {
-        description: `${task.name} verified by ${confirmName} at ${timeStr}`,
+        description: `${task.name} verified by ${confirmName.trim()} at ${timeStr}`,
       });
 
+      if (!isMountedRef.current) return;
       setIsSubmitting(false);
 
       // 5. Navigate back after short delay for animation
-      setTimeout(() => onComplete(), 500);
-
+      completeTimerRef.current = setTimeout(() => onComplete(), 500);
     } catch (error) {
       console.error('Error submitting task:', error);
-      setUploadError(error instanceof Error ? error.message : 'Upload failed');
-      toast.error('Failed to upload photo. Please try again.');
+      if (!isMountedRef.current) return;
+      setUploadError(error instanceof Error ? error.message : 'Submission failed');
+      toast.error('Failed to submit task. Please try again.');
       setIsSubmitting(false);
     }
   };
@@ -145,9 +178,11 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
       <div className="bg-black text-white p-4 flex items-center justify-between border-b border-gray-800">
         <div className="flex items-center gap-3">
           <Button
+            type="button"
             variant="ghost"
             size="icon"
             onClick={onBack}
+            aria-label="Close"
             className="text-white hover:bg-gray-800"
           >
             <X className="w-5 h-5" />
@@ -186,6 +221,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
                     <p className="text-sm text-gray-400">{task.description}</p>
                   </div>
                   <Button
+                    type="button"
                     onClick={handleCapture}
                     className="w-full bg-blue-600 hover:bg-blue-700 py-6"
                     size="lg"
@@ -251,6 +287,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
                     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                       <p className="text-red-600 text-sm mb-2">{uploadError}</p>
                       <Button
+                        type="button"
                         onClick={handleSubmit}
                         disabled={isSubmitting}
                         className="w-full bg-red-600 hover:bg-red-700"
@@ -262,6 +299,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
 
                   <div className="flex gap-3">
                     <Button
+                      type="button"
                       onClick={handleRetake}
                       variant="outline"
                       className="flex-1 border-gray-700 text-white hover:bg-gray-800"
@@ -271,6 +309,7 @@ export function QRScanScreen({ task, employee, onBack, onComplete }: QRScanScree
                       Retake
                     </Button>
                     <Button
+                      type="button"
                       onClick={handleSubmit}
                       disabled={isSubmitting || !confirmName.trim()}
                       className="flex-1 bg-green-600 hover:bg-green-700"

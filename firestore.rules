@@ -1,109 +1,159 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
+    // ---------- Helpers ----------
+    // Roles are always resolved from the trusted /users/{uid} document,
+    // never from client-supplied request data.
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-    
-    function isOwner() {
-      return getUserRole() == 'owner';
-    }
-    
-    function isManager() {
-      return getUserRole() == 'manager';
-    }
-    
-    function isEmployee() {
-      return getUserRole() == 'employee';
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
+    function hasUserDoc() {
+      return isAuthenticated() && exists(userDocPath());
+    }
+
+    function getUserRole() {
+      return get(userDocPath()).data.role;
+    }
+
+    function isOwner() {
+      return hasUserDoc() && getUserRole() == 'owner';
+    }
+
+    function isManager() {
+      return hasUserDoc() && getUserRole() == 'manager';
+    }
+
+    function isEmployee() {
+      return hasUserDoc() && getUserRole() == 'employee';
+    }
+
+    function isStaff() {
+      return isOwner() || isManager();
+    }
+
+    function isKnownRole() {
+      return isOwner() || isManager() || isEmployee();
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ---------- users ----------
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || request.auth.uid == userId;
+      // Only owners may provision accounts or change roles / status.
+      allow create, delete: if isOwner();
+      allow update: if isOwner()
+        || (request.auth.uid == userId
+            && !changedKeys().hasAny(['role', 'isActive', 'email']));
     }
 
+    // ---------- tasks ----------
     match /tasks/{taskId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isOwner() || isManager();
-      // Allow any authenticated user to mark tasks as completed
-      allow update: if isOwner() || isManager() ||
-        (isAuthenticated() && request.resource.data.status == 'completed');
+      allow create, delete: if isStaff();
+      // Employees may only mark a task completed (QR check-in flow).
+      allow update: if isStaff()
+        || (isEmployee()
+            && request.resource.data.status == 'completed'
+            && changedKeys().hasOnly(['status', 'completedAt', 'completedBy']));
     }
-    
+
+    // ---------- taskSubmissions ----------
     match /taskSubmissions/{submissionId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated(); // Allow any authenticated user to create submissions
-      allow update, delete: if isOwner() || isManager();
+      allow create: if isStaff()
+        || (isEmployee() && request.resource.data.employeeId == request.auth.uid);
+      allow update, delete: if isStaff();
     }
-    
+
+    // ---------- employees ----------
     match /employees/{employeeId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
+      allow write: if isStaff();
     }
-    
+
+    // ---------- inventory ----------
     match /inventory/{inventoryId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-      
+      // Employees submit station counts; only staff may remove items.
+      allow create, update: if isKnownRole();
+      allow delete: if isStaff();
+
       match /history/{historyId} {
-        allow read, write: if isAuthenticated();
+        allow read: if isAuthenticated();
+        // Audit log: append-only.
+        allow create: if isKnownRole();
+        allow update, delete: if false;
       }
     }
-    
+
+    // ---------- reports / requests ----------
     match /financialReports/{reportId} {
-      allow read: if isOwner() || isManager();
-      allow write: if isOwner() || isManager();
+      allow read, write: if isStaff();
     }
-    
+
     match /apepoReports/{reportId} {
-      allow read: if isOwner() || isManager();
-      allow write: if isOwner() || isManager();
+      allow read, write: if isStaff();
     }
-    
+
     match /requests/{requestId} {
-      allow read: if isOwner() || isManager();
-      allow write: if isOwner() || isManager();
+      allow read, write: if isStaff();
     }
-    
+
+    // ---------- payroll ----------
     match /payroll/{payrollId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
+      // Employees may see their own payroll; staff see all.
+      allow read: if isStaff()
+        || (isAuthenticated() && resource.data.employeeId == request.auth.uid);
+      allow write: if isStaff();
     }
-    
+
+    // ---------- managerTasks ----------
     match /managerTasks/{managerTaskId} {
-      allow read: if isOwner() || isManager();
-      allow write: if isOwner() || isManager();
+      allow read, write: if isStaff();
     }
-    
+
+    // ---------- recipes ----------
     match /recipes/{recipeId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
-      
+      allow write: if isStaff();
+
       match /views/{viewId} {
-        allow read, write: if isAuthenticated();
+        allow read, create: if isAuthenticated();
+        allow update, delete: if isStaff();
       }
     }
-    
+
+    // ---------- notifications ----------
     match /notifications/{notificationId} {
-      allow read, update: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
-      allow create, delete: if isOwner() || isManager();
+      allow read: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
+      // Recipients may only toggle read state.
+      allow update: if isAuthenticated()
+        && resource.data.recipientId == request.auth.uid
+        && changedKeys().hasOnly(['read', 'readAt']);
+      allow create, delete: if isStaff();
     }
-    
+
+    // ---------- branches / settings ----------
     match /branches/{branchId} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
     }
-    
+
     match /settings/{document=**} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
     }
 
+    // ---------- products / ingredients ----------
     match /products/{productId} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
@@ -117,6 +167,25 @@ service cloud.firestore {
     match /ingredients/{ingredientId} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
+    }
+
+    // ---------- cupInventoryRecords ----------
+    match /cupInventoryRecords/{recordId} {
+      allow read: if isAuthenticated();
+      // Team members submit counts; managers/owners review and adjust.
+      allow create, update: if isKnownRole();
+      // No hard deletes from dashboards.
+      allow delete: if false;
+    }
+
+    // ---------- emailQueue (Cloud Functions / Admin SDK only) ----------
+    match /emailQueue/{mailId} {
+      allow read, write: if false;
+    }
+
+    // Deny everything not explicitly matched above.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

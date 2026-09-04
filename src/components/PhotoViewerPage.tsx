@@ -5,7 +5,8 @@ import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { Label } from './ui/label';
 import { Calendar, Clock, User, MapPin, ChefHat, Coffee, ArrowLeft, Filter } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Screen } from '../App';
@@ -28,14 +29,32 @@ interface PhotoViewerPageProps {
   isOwner?: boolean;
 }
 
+type StationFilter = 'all' | 'kitchen' | 'coffee-bar';
+type CategoryFilter = 'all' | 'opening' | 'closing';
+
+const isStationFilter = (value: string): value is StationFilter =>
+  value === 'all' || value === 'kitchen' || value === 'coffee-bar';
+const isCategoryFilter = (value: string): value is CategoryFilter =>
+  value === 'all' || value === 'opening' || value === 'closing';
+
+const formatDate = (value: string): string => {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+};
+
 export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPageProps) {
-  const [selectedStation, setSelectedStation] = useState<'all' | 'kitchen' | 'coffee-bar'>('all');
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'opening' | 'closing'>('all');
+  const [selectedStation, setSelectedStation] = useState<StationFilter>('all');
+  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
   const [photoSubmissions, setPhotoSubmissions] = useState<PhotoSubmission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Load real data from Firestore
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+
     // Build query with station filter if not 'all'
     let q;
     if (selectedStation === 'all') {
@@ -51,39 +70,46 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
       );
     }
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedPhotos: PhotoSubmission[] = snapshot.docs.map(doc => {
-        const data = doc.data();
-        const timestamp = data.timestamp?.toDate?.();
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const loadedPhotos: PhotoSubmission[] = snapshot.docs.map(doc => {
+          const data = doc.data();
+          const timestamp: Date | undefined = data.timestamp?.toDate?.();
 
-        return {
-          id: doc.id,
-          employeeName: data.employeeName || '',
-          taskName: data.taskName || '',
-          station: data.station,
-          category: data.category,
-          timestamp: timestamp ? timestamp.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit'
-          }) : '',
-          date: data.date || '',
-          imageUrl: data.photoUrl || '',
-          verified: data.verified || false,
-        };
-      });
+          return {
+            id: doc.id,
+            employeeName: data.employeeName || '',
+            taskName: data.taskName || '',
+            station: data.station === 'kitchen' ? 'kitchen' : 'coffee-bar',
+            category: data.category === 'closing' ? 'closing' : 'opening',
+            timestamp: timestamp ? timestamp.toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit'
+            }) : '',
+            date: data.date || '',
+            imageUrl: data.photoUrl || '',
+            verified: data.verified === true,
+          };
+        });
 
-      setPhotoSubmissions(loadedPhotos);
-      setLoading(false);
-    });
+        setPhotoSubmissions(loadedPhotos);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error loading photo submissions:', err);
+        setError('Failed to load photo submissions. Please try again.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, [selectedStation]);
 
   // Client-side category filtering
-  const filteredPhotos = photoSubmissions.filter(photo => {
-    const categoryMatch = selectedCategory === 'all' || photo.category === selectedCategory;
-    return categoryMatch;
-  });
+  const filteredPhotos = photoSubmissions.filter(
+    photo => selectedCategory === 'all' || photo.category === selectedCategory
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
@@ -97,6 +123,7 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
                 size="icon"
                 onClick={() => onNavigate(isOwner ? 'owner-dashboard' : 'manager-dashboard')}
                 className="text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                aria-label="Back to dashboard"
               >
                 <ArrowLeft className="w-5 h-5" />
               </Button>
@@ -127,7 +154,7 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
             <Card className="border-cyan-100">
               <CardContent className="pt-6">
                 <Label className="text-sm mb-2 block text-gray-700">Filter by Station</Label>
-                <Tabs value={selectedStation} onValueChange={(v: any) => setSelectedStation(v)}>
+                <Tabs value={selectedStation} onValueChange={(v) => { if (isStationFilter(v)) setSelectedStation(v); }}>
                   <TabsList className="grid w-full grid-cols-3 bg-cyan-100">
                     <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
                       All Stations
@@ -149,7 +176,7 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
             <Card className="border-cyan-100">
               <CardContent className="pt-6">
                 <Label className="text-sm mb-2 block text-gray-700">Filter by Category</Label>
-                <Tabs value={selectedCategory} onValueChange={(v: any) => setSelectedCategory(v)}>
+                <Tabs value={selectedCategory} onValueChange={(v) => { if (isCategoryFilter(v)) setSelectedCategory(v); }}>
                   <TabsList className="grid w-full grid-cols-3 bg-cyan-100">
                     <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:text-cyan-700">
                       All Tasks
@@ -188,8 +215,13 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
         </div>
 
         {/* Photo Grid */}
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm" role="alert">
+            {error}
+          </div>
+        )}
         {loading ? (
-          <div className="flex justify-center items-center py-12">
+          <div className="flex justify-center items-center py-12" role="status" aria-label="Loading photos">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
           </div>
         ) : (
@@ -253,7 +285,7 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
                     </div>
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-cyan-600" />
-                      <span>{new Date(photo.date).toLocaleDateString()}</span>
+                      <span>{formatDate(photo.date)}</span>
                     </div>
                   </div>
                 </CardContent>
@@ -275,5 +307,3 @@ export function PhotoViewerPage({ onNavigate, isOwner = false }: PhotoViewerPage
   );
 }
 
-// Import Label separately to avoid issues
-import { Label } from './ui/label';

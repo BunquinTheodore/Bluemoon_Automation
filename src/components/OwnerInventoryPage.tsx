@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -46,11 +46,32 @@ interface InventorySubmission {
   notes: string;
 }
 
-// Helper function to calculate inventory status based on total quantity
-const calculateStatus = (total: number): 'good' | 'low' | 'critical' => {
-  if (total < 5) return 'critical';
-  if (total < 15) return 'low';
+const DEFAULT_LOW_STOCK_THRESHOLD = 15;
+const DEFAULT_CRITICAL_THRESHOLD = 5;
+
+const toNumber = (value: unknown, fallback = 0): number => {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+// Calculate inventory status from total quantity, honouring per-item thresholds when present
+const calculateStatus = (
+  total: number,
+  lowThreshold = DEFAULT_LOW_STOCK_THRESHOLD,
+  criticalThreshold = DEFAULT_CRITICAL_THRESHOLD,
+): 'good' | 'low' | 'critical' => {
+  const critical = Math.max(0, criticalThreshold);
+  const low = Math.max(critical, lowThreshold);
+  if (total <= critical) return 'critical';
+  if (total <= low) return 'low';
   return 'good';
+};
+
+const formatDate = (value: unknown): string => {
+  if (value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  return '—';
 };
 
 export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps) {
@@ -61,35 +82,41 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [dailySubmissions, setDailySubmissions] = useState<InventorySubmission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Unsaved owner edits, keyed by inventory doc id, so live snapshots don't clobber them
+  const pendingEdits = useRef<Map<string, { ownerDelivered: number; ownerDateDelivered: string }>>(new Map());
+  // Guards against out-of-order responses when the user changes dates quickly
+  const submissionsRequestId = useRef(0);
 
   // Fetch inventory from Firestore
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'inventory'), (snapshot) => {
       const items: InventoryItem[] = snapshot.docs.map((docSnap) => {
         const data = docSnap.data();
-        const sealed = typeof data.sealed === 'number' ? data.sealed : 0;
-        const loose = typeof data.loose === 'number' ? data.loose : 0;
+        const sealed = Math.max(0, toNumber(data.sealed));
+        const loose = Math.max(0, toNumber(data.loose));
         const total = sealed + loose;
 
-        // Calculate status based on thresholds
-        const status = calculateStatus(total);
+        const status = calculateStatus(
+          total,
+          toNumber(data.lowStockThreshold, DEFAULT_LOW_STOCK_THRESHOLD),
+          toNumber(data.criticalThreshold, DEFAULT_CRITICAL_THRESHOLD),
+        );
 
-        // Format lastUpdated timestamp
-        const lastUpdated = data.lastUpdated && typeof data.lastUpdated.toDate === 'function'
-          ? data.lastUpdated.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-          : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const pending = pendingEdits.current.get(docSnap.id);
 
         return {
-          id: data.inventoryId || docSnap.id,
+          id: docSnap.id,
           productName: data.productName || '',
           sealed,
           loose,
           unit: data.unit || '',
           status,
           dateDelivered: data.dateDelivered || '',
-          lastUpdated,
-          ownerDelivered: typeof data.ownerDelivered === 'number' ? data.ownerDelivered : 0,
-          ownerDateDelivered: data.ownerDateDelivered || '',
+          lastUpdated: formatDate(data.lastUpdated),
+          ownerDelivered: pending ? pending.ownerDelivered : Math.max(0, toNumber(data.ownerDelivered)),
+          ownerDateDelivered: pending ? pending.ownerDateDelivered : (data.ownerDateDelivered || ''),
           station: data.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
         };
       });
@@ -108,36 +135,50 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
   const criticalItems = inventory.filter(item => item.status === 'critical');
   const lowItems = inventory.filter(item => item.status === 'low');
 
+  const applyOwnerEdit = (id: string, patch: Partial<Pick<InventoryItem, 'ownerDelivered' | 'ownerDateDelivered'>>) => {
+    setInventory(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const next = { ...item, ...patch };
+      pendingEdits.current.set(id, {
+        ownerDelivered: next.ownerDelivered,
+        ownerDateDelivered: next.ownerDateDelivered,
+      });
+      return next;
+    }));
+  };
+
   const handleOwnerDeliveredChange = (id: string, value: string) => {
-    // Update local state immediately for responsiveness
-    setInventory(inventory.map(item =>
-      item.id === id ? { ...item, ownerDelivered: Number(value) || 0 } : item
-    ));
+    applyOwnerEdit(id, { ownerDelivered: Math.max(0, toNumber(value)) });
   };
 
   const handleOwnerDateDeliveredChange = (id: string, value: string) => {
-    // Update local state immediately for responsiveness
-    setInventory(inventory.map(item =>
-      item.id === id ? { ...item, ownerDateDelivered: value } : item
-    ));
+    applyOwnerEdit(id, { ownerDateDelivered: value });
   };
 
   const handleSaveInventory = async () => {
-    try {
-      // Save all owner delivery data to Firestore
-      const updates = inventory.map(async (item) => {
-        const docRef = doc(db, 'inventory', item.id);
-        await updateDoc(docRef, {
-          ownerDelivered: item.ownerDelivered,
-          ownerDateDelivered: item.ownerDateDelivered,
-        });
-      });
+    const edits = Array.from(pendingEdits.current.entries());
+    if (edits.length === 0) {
+      toast.info('No changes to save');
+      return;
+    }
 
-      await Promise.all(updates);
+    setSaving(true);
+    try {
+      await Promise.all(
+        edits.map(([id, edit]) =>
+          updateDoc(doc(db, 'inventory', id), {
+            ownerDelivered: edit.ownerDelivered,
+            ownerDateDelivered: edit.ownerDateDelivered,
+          })
+        )
+      );
+      pendingEdits.current.clear();
       toast.success('Inventory data saved successfully!');
     } catch (error) {
       console.error('Error saving inventory:', error);
       toast.error('Failed to save inventory data');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -172,24 +213,23 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
       return;
     }
 
+    setDeleting(true);
     try {
-      // Delete selected items from Firestore
-      const deletions = selectedItems.map(async (itemId) => {
-        const docRef = doc(db, 'inventory', itemId);
-        await deleteDoc(docRef);
-      });
-
-      await Promise.all(deletions);
+      await Promise.all(selectedItems.map((itemId) => deleteDoc(doc(db, 'inventory', itemId))));
+      selectedItems.forEach((itemId) => pendingEdits.current.delete(itemId));
       toast.success(`${selectedItems.length} item(s) deleted successfully!`);
       setSelectedItems([]);
       setDeleteMode(false);
     } catch (error) {
       console.error('Error deleting items:', error);
       toast.error('Failed to delete items');
+    } finally {
+      setDeleting(false);
     }
   };
 
   const fetchSubmissionsForDate = async (date: Date) => {
+    const requestId = ++submissionsRequestId.current;
     setLoadingSubmissions(true);
     try {
       // Define date range for the selected day
@@ -203,13 +243,11 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
       const inventorySnapshot = await getDocs(collection(db, 'inventory'));
       const allSubmissions: InventorySubmission[] = [];
 
-      // For each inventory item, query its history subcollection for the selected date
-      for (const inventoryDoc of inventorySnapshot.docs) {
+      // Query each item's history subcollection for the selected day, in parallel
+      await Promise.all(inventorySnapshot.docs.map(async (inventoryDoc) => {
         const inventoryData = inventoryDoc.data();
-        const historyRef = collection(db, 'inventory', inventoryDoc.id, 'history');
-
         const historyQuery = query(
-          historyRef,
+          collection(db, 'inventory', inventoryDoc.id, 'history'),
           where('timestamp', '>=', startOfDay),
           where('timestamp', '<=', endOfDay),
           orderBy('timestamp', 'desc')
@@ -217,32 +255,42 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
 
         const historySnapshot = await getDocs(historyQuery);
 
-        historySnapshot.docs.forEach(doc => {
-          const data = doc.data();
+        historySnapshot.docs.forEach((historyDoc) => {
+          const data = historyDoc.data();
+          const sealed = Math.max(0, toNumber(data.sealed));
+          const loose = Math.max(0, toNumber(data.loose));
+          const timestamp = data.timestamp && typeof data.timestamp.toDate === 'function'
+            ? data.timestamp.toDate()
+            : startOfDay;
           allSubmissions.push({
-            historyId: doc.id,
+            historyId: `${inventoryDoc.id}_${historyDoc.id}`,
             productName: inventoryData.productName || '[Deleted Product]',
             unit: inventoryData.unit || '',
             station: inventoryData.station === 'coffee-bar' ? 'coffee-bar' : 'kitchen',
-            sealed: data.sealed || 0,
-            loose: data.loose || 0,
-            delivered: data.total || 0,
+            sealed,
+            loose,
+            delivered: toNumber(data.total, sealed + loose),
             submittedBy: data.changedBy || '',
             submittedByName: data.changedByName || 'Unknown',
-            timestamp: data.timestamp?.toDate() || new Date(),
+            timestamp,
             notes: data.notes || ''
           });
         });
-      }
+      }));
+
+      if (requestId !== submissionsRequestId.current) return;
 
       // Sort by timestamp (most recent first)
       allSubmissions.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       setDailySubmissions(allSubmissions);
     } catch (error) {
+      if (requestId !== submissionsRequestId.current) return;
       console.error('Error fetching submissions:', error);
       toast.error('Failed to load inventory submissions');
     } finally {
-      setLoadingSubmissions(false);
+      if (requestId === submissionsRequestId.current) {
+        setLoadingSubmissions(false);
+      }
     }
   };
 
@@ -253,7 +301,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Go back">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div className="flex items-center gap-3">
@@ -267,10 +315,12 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
               </div>
             </div>
             <Button
+              type="button"
               variant="ghost"
               onClick={onLogout}
               className="text-gray-700 hover:text-red-600 hover:bg-red-50"
               title="Logout"
+              aria-label="Logout"
             >
               <LogOut className="w-5 h-5" />
             </Button>
@@ -301,21 +351,26 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
               <Calendar
                 mode="single"
                 selected={selectedDate}
-                onSelect={(date) => {
+                onSelect={(date: Date | undefined) => {
                   setSelectedDate(date);
                   if (date) {
-                    fetchSubmissionsForDate(date);
+                    void fetchSubmissionsForDate(date);
                   } else {
+                    submissionsRequestId.current += 1;
                     setDailySubmissions([]);
+                    setLoadingSubmissions(false);
                   }
                 }}
                 className="rounded-lg border shadow-sm"
               />
               {selectedDate && (
                 <Button
+                  type="button"
                   onClick={() => {
+                    submissionsRequestId.current += 1;
                     setSelectedDate(undefined);
                     setDailySubmissions([]);
+                    setLoadingSubmissions(false);
                   }}
                   variant="outline"
                   className="w-full mt-4"
@@ -523,16 +578,19 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
         <div className="flex justify-end gap-2 mb-4">
           {deleteMode && (
             <Button
+              type="button"
               onClick={handleDeleteSelected}
               variant="destructive"
-              disabled={selectedItems.length === 0}
+              disabled={selectedItems.length === 0 || deleting}
             >
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete Selected ({selectedItems.length})
+              {deleting ? 'Deleting...' : `Delete Selected (${selectedItems.length})`}
             </Button>
           )}
           <Button
+            type="button"
             onClick={handleToggleDeleteMode}
+            disabled={deleting}
             variant={deleteMode ? 'outline' : 'default'}
             className={deleteMode ? '' : 'bg-blue-600 hover:bg-blue-700'}
           >
@@ -571,6 +629,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                         {deleteMode && (
                           <TableHead className="w-12">
                             <Checkbox
+                              aria-label="Select all kitchen items"
                               checked={inventory.filter(item => item.station === 'kitchen').every(item => selectedItems.includes(item.id))}
                               onCheckedChange={() => handleSelectAll('kitchen')}
                             />
@@ -589,6 +648,13 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                       </TableRow>
                     </TableHeader>
                     <TableBody>
+                      {inventory.filter(item => item.station === 'kitchen').length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={deleteMode ? 11 : 10} className="text-center py-8 text-gray-500">
+                            No kitchen inventory items yet
+                          </TableCell>
+                        </TableRow>
+                      )}
                       {inventory.filter(item => item.station === 'kitchen').map((item) => (
                         <TableRow 
                           key={item.id}
@@ -600,6 +666,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           {deleteMode && (
                             <TableCell>
                               <Checkbox
+                                aria-label={`Select ${item.productName}`}
                                 checked={selectedItems.includes(item.id)}
                                 onCheckedChange={() => handleSelectItem(item.id)}
                               />
@@ -648,7 +715,9 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           <TableCell className="text-center bg-blue-50">
                             <Input
                               type="number"
+                              min={0}
                               placeholder="Qty"
+                              aria-label={`Total delivered for ${item.productName}`}
                               value={item.ownerDelivered}
                               onChange={(e) => handleOwnerDeliveredChange(item.id, e.target.value)}
                               className="w-24 text-center mx-auto"
@@ -658,6 +727,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           <TableCell className="text-center bg-blue-50">
                             <Input
                               type="date"
+                              aria-label={`Owner date delivered for ${item.productName}`}
                               value={item.ownerDateDelivered}
                               onChange={(e) => handleOwnerDateDeliveredChange(item.id, e.target.value)}
                               className="w-40 mx-auto"
@@ -671,8 +741,8 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                 </div>
 
                 {!deleteMode && (
-                  <Button onClick={handleSaveInventory} className="w-full bg-blue-600 hover:bg-blue-700">
-                    Save Kitchen Inventory
+                  <Button type="button" onClick={handleSaveInventory} disabled={saving} className="w-full bg-blue-600 hover:bg-blue-700">
+                    {saving ? 'Saving...' : 'Save Kitchen Inventory'}
                   </Button>
                 )}
               </CardContent>
@@ -697,6 +767,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                         {deleteMode && (
                           <TableHead className="w-12">
                             <Checkbox
+                              aria-label="Select all coffee bar items"
                               checked={inventory.filter(item => item.station === 'coffee-bar').every(item => selectedItems.includes(item.id))}
                               onCheckedChange={() => handleSelectAll('coffee-bar')}
                             />
@@ -715,6 +786,13 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                       </TableRow>
                     </TableHeader>
                     <TableBody>
+                      {inventory.filter(item => item.station === 'coffee-bar').length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={deleteMode ? 11 : 10} className="text-center py-8 text-gray-500">
+                            No coffee bar inventory items yet
+                          </TableCell>
+                        </TableRow>
+                      )}
                       {inventory.filter(item => item.station === 'coffee-bar').map((item) => (
                         <TableRow 
                           key={item.id}
@@ -726,6 +804,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           {deleteMode && (
                             <TableCell>
                               <Checkbox
+                                aria-label={`Select ${item.productName}`}
                                 checked={selectedItems.includes(item.id)}
                                 onCheckedChange={() => handleSelectItem(item.id)}
                               />
@@ -774,7 +853,9 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           <TableCell className="text-center bg-blue-50">
                             <Input
                               type="number"
+                              min={0}
                               placeholder="Qty"
+                              aria-label={`Total delivered for ${item.productName}`}
                               value={item.ownerDelivered}
                               onChange={(e) => handleOwnerDeliveredChange(item.id, e.target.value)}
                               className="w-24 text-center mx-auto"
@@ -784,6 +865,7 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                           <TableCell className="text-center bg-blue-50">
                             <Input
                               type="date"
+                              aria-label={`Owner date delivered for ${item.productName}`}
                               value={item.ownerDateDelivered}
                               onChange={(e) => handleOwnerDateDeliveredChange(item.id, e.target.value)}
                               className="w-40 mx-auto"
@@ -797,8 +879,8 @@ export function OwnerInventoryPage({ onBack, onLogout }: OwnerInventoryPageProps
                 </div>
 
                 {!deleteMode && (
-                  <Button onClick={handleSaveInventory} className="w-full bg-blue-600 hover:bg-blue-700">
-                    Save Coffee Bar Inventory
+                  <Button type="button" onClick={handleSaveInventory} disabled={saving} className="w-full bg-blue-600 hover:bg-blue-700">
+                    {saving ? 'Saving...' : 'Save Coffee Bar Inventory'}
                   </Button>
                 )}
               </CardContent>

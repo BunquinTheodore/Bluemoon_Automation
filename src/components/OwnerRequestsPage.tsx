@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { Timestamp, collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 import { ArrowLeft, FileText, LogOut, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
@@ -26,47 +26,60 @@ interface ShopRequest {
 
 export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) {
   const [requests, setRequests] = useState<ShopRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const requestsCollection = collection(db, 'requests');
 
-    const unsubscribe = onSnapshot(requestsCollection, (snapshot) => {
-      const loadedRequests: ShopRequest[] = snapshot.docs
-        .map((docSnap) => {
-          const data = docSnap.data() as any;
-          const submittedAtRaw = (data as any).submittedAt;
-          const submittedAt =
-            submittedAtRaw && typeof submittedAtRaw.toDate === 'function'
-              ? submittedAtRaw.toDate()
-              : new Date();
+    const unsubscribe = onSnapshot(
+      requestsCollection,
+      (snapshot) => {
+        const loadedRequests: ShopRequest[] = snapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            const submittedAtRaw = data.submittedAt;
+            const submittedAt: Date =
+              submittedAtRaw instanceof Timestamp
+                ? submittedAtRaw.toDate()
+                : typeof submittedAtRaw === 'string' && !Number.isNaN(new Date(submittedAtRaw).getTime())
+                ? new Date(submittedAtRaw)
+                : new Date(0);
 
-          const quantityRaw = (data as any).quantity;
-          const quantity =
-            typeof quantityRaw === 'number' && Number.isFinite(quantityRaw) && quantityRaw > 0
-              ? quantityRaw
-              : 0;
+            const quantityRaw = typeof data.quantity === 'string' ? Number(data.quantity) : data.quantity;
+            const quantity =
+              typeof quantityRaw === 'number' && Number.isFinite(quantityRaw) && quantityRaw > 0
+                ? quantityRaw
+                : 0;
 
-          return {
-            id: docSnap.id,
-            itemName: data.itemName || '',
-            quantity,
-            unit: data.unit || 'units',
-            priority:
-              (data.priority === 'high'
-                ? 'high'
-                : data.priority === 'medium'
-                ? 'medium'
-                : 'low') as 'low' | 'medium' | 'high',
-            remarks: data.remarks || '',
-            manager: data.managerName || 'Manager',
-            submittedAt,
-          };
-        })
-        .filter((request) => request.itemName.trim().length > 0 && request.quantity > 0);
+            return {
+              id: docSnap.id,
+              itemName: typeof data.itemName === 'string' ? data.itemName : '',
+              quantity,
+              unit: typeof data.unit === 'string' && data.unit ? data.unit : 'units',
+              priority:
+                (data.priority === 'high'
+                  ? 'high'
+                  : data.priority === 'medium'
+                  ? 'medium'
+                  : 'low') as 'low' | 'medium' | 'high',
+              remarks: typeof data.remarks === 'string' ? data.remarks : '',
+              manager: typeof data.managerName === 'string' && data.managerName ? data.managerName : 'Manager',
+              submittedAt,
+            };
+          })
+          .filter((request) => request.itemName.trim().length > 0 && request.quantity > 0);
 
-      loadedRequests.sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime());
-      setRequests(loadedRequests);
-    });
+        loadedRequests.sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+        setRequests(loadedRequests);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error loading requests', error);
+        toast.error('Failed to load requests.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -80,12 +93,15 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
       return;
     }
 
+    setDeletingId(id);
     try {
       await deleteDoc(doc(db, 'requests', id));
       toast.success('Request deleted');
     } catch (error) {
       console.error('Error deleting request', error);
       toast.error('Failed to delete request. Please try again.');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -154,6 +170,16 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
         </div>
 
         {/* Requests List */}
+        {loading ? (
+          <div className="flex justify-center items-center py-12" role="status" aria-label="Loading requests">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+          </div>
+        ) : requests.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No shop requests yet</p>
+          </div>
+        ) : null}
         <div className="space-y-4">
           {requests.map((request, index) => (
             <motion.div
@@ -172,7 +198,7 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
                     <div className="flex-1">
                       <h3 className="text-lg text-gray-900 mb-1">{request.itemName}</h3>
                       <p className="text-sm text-gray-500">
-                        By {request.manager} • {request.submittedAt.toLocaleString()}
+                        By {request.manager} • {request.submittedAt.getTime() > 0 ? request.submittedAt.toLocaleString() : 'Pending sync'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -188,7 +214,9 @@ export function OwnerRequestsPage({ onBack, onLogout }: OwnerRequestsPageProps) 
                         size="icon"
                         className="text-gray-400 hover:text-red-600 hover:bg-red-50"
                         onClick={() => handleDeleteRequest(request.id)}
+                        disabled={deletingId === request.id}
                         title="Delete request"
+                        aria-label="Delete request"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>

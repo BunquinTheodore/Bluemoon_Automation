@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -19,14 +19,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from './ui/dialog';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -57,7 +49,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   });
 
   const handleAddTask = () => {
-    if (!newTask.name || !newTask.location) {
+    if (!newTask.name.trim() || !newTask.location.trim()) {
       toast.error('Please fill in all required fields');
       return;
     }
@@ -82,7 +74,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
       <header className="bg-white border-b border-blue-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={onBack}>
+            <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Go back">
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
@@ -95,8 +87,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-gray-200">
+        <div role="tablist" className="flex gap-2 mb-6 border-b border-gray-200">
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'tasks'}
             onClick={() => setActiveTab('tasks')}
             className={`px-4 py-2 border-b-2 transition-colors ${
               activeTab === 'tasks'
@@ -108,6 +103,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             Tasks
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'employees'}
             onClick={() => setActiveTab('employees')}
             className={`px-4 py-2 border-b-2 transition-colors ${
               activeTab === 'employees'
@@ -119,6 +117,9 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
             Employees
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'branches'}
             onClick={() => setActiveTab('branches')}
             className={`px-4 py-2 border-b-2 transition-colors ${
               activeTab === 'branches'
@@ -161,9 +162,11 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                       <div className="flex items-center justify-between">
                         <CardTitle>New Task</CardTitle>
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
                           onClick={() => setIsAddingTask(false)}
+                          aria-label="Close"
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -253,13 +256,15 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                           </div>
                         </div>
                         <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${task.name}`}>
                             <Edit className="w-4 h-4 text-gray-400" />
                           </Button>
                           <Button
+                            type="button"
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
+                            aria-label={`Delete ${task.name}`}
                             onClick={() => handleDeleteTask(task.name)}
                           >
                             <Trash2 className="w-4 h-4 text-red-400" />
@@ -328,10 +333,10 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                         </div>
                       </div>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${employee.name}`}>
                           <Edit className="w-4 h-4 text-gray-400" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Delete ${employee.name}`}>
                           <Trash2 className="w-4 h-4 text-red-400" />
                         </Button>
                       </div>
@@ -372,7 +377,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
                           <Building2 className="w-5 h-5 text-blue-600" />
                           <CardTitle className="text-lg">{branch}</CardTitle>
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${branch}`}>
                           <Edit className="w-4 h-4 text-gray-400" />
                         </Button>
                       </div>

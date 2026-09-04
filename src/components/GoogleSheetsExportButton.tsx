@@ -23,6 +23,7 @@ export function GoogleSheetsExportButton({
     isAuthenticated,
     isLoading,
     isInitializing,
+    error,
     signIn,
     exportReport,
   } = useGoogleSheets();
@@ -33,82 +34,42 @@ export function GoogleSheetsExportButton({
   const handleClick = async () => {
     if (!report) return;
 
-    try {
-      // Auto-authenticate if not already signed in
-      if (!isAuthenticated) {
-        await signIn();
-        // After successful sign-in, export will happen automatically
-        // via the auth state change listener in useGoogleSheets
-      }
+    // Auto-authenticate if not already signed in. signIn resolves to whether a
+    // valid token is now available, so we don't rely on stale React state here.
+    const ready = isAuthenticated || (await signIn());
+    if (!ready) return;
 
-      // If already authenticated, export immediately
-      if (isAuthenticated) {
-        await exportReport(report);
-      }
-    } catch (error) {
-      // Error handling is done in useGoogleSheets hook with toasts
-      console.error('Error in export flow:', error);
-    }
+    await exportReport(report);
   };
 
-  /**
-   * Determine button state and content
-   */
-  const getButtonContent = () => {
-    // Still initializing Google API
-    if (isInitializing) {
-      return {
-        icon: <Loader2 className="w-4 h-4 mr-2 animate-spin" />,
-        text: 'Save to Google Sheets',
-        disabled: true,
-        className: 'bg-gray-400 cursor-not-allowed',
-      };
-    }
+  const isBusy = isInitializing || isLoading;
+  const isDisabled = disabled || isBusy || !report;
 
-    // Loading state (authenticating or exporting)
-    if (isLoading) {
-      return {
-        icon: <Loader2 className="w-4 h-4 mr-2 animate-spin" />,
-        text: 'Saving...',
-        disabled: true,
-        className: 'bg-cyan-600 cursor-not-allowed',
-      };
-    }
-
-    // No report selected
-    if (!report) {
-      return {
-        icon: <FileSpreadsheet className="w-4 h-4 mr-2" />,
-        text: 'Save to Google Sheets',
-        disabled: true,
-        className: 'bg-cyan-600 opacity-50 cursor-not-allowed',
-      };
-    }
-
-    // Ready to save (report selected)
-    return {
-      icon: <FileSpreadsheet className="w-4 h-4 mr-2" />,
-      text: 'Save to Google Sheets',
-      disabled: disabled,
-      className: 'bg-cyan-600 hover:bg-cyan-700',
-    };
-  };
-
-  const buttonContent = getButtonContent();
+  const title = isInitializing
+    ? 'Preparing Google Sheets...'
+    : !report
+      ? 'Select a report to save'
+      : error
+        ? error
+        : 'Save this report to Google Sheets';
 
   return (
     <Button
+      type="button"
       onClick={handleClick}
-      disabled={buttonContent.disabled}
-      className={`text-white disabled:opacity-50 ${buttonContent.className}`}
-      title={
-        !report
-          ? 'Select a report to save'
-          : 'Save this report to Google Sheets'
-      }
+      disabled={isDisabled}
+      aria-busy={isBusy}
+      className={`text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+        isInitializing ? 'bg-gray-400 hover:bg-gray-400' : ''
+      }`}
+      title={title}
     >
-      {buttonContent.icon}
-      {buttonContent.text}
+      {isBusy ? (
+        <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+      ) : (
+        <FileSpreadsheet className="w-4 h-4 mr-2" aria-hidden="true" />
+      )}
+      {isLoading ? 'Saving...' : 'Save to Google Sheets'}
     </Button>
   );
 }

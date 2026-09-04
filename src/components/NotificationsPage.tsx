@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Screen, Task } from '../App';
-import { ArrowLeft, Bell, CheckCircle2, Clock, Image as ImageIcon, Trash2, LogOut } from 'lucide-react';
+import { ArrowLeft, Bell, CheckCircle2, Clock, Trash2, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState, type MouseEvent } from 'react';
 
@@ -13,7 +13,21 @@ interface NotificationsPageProps {
   onLogout?: () => void;
 }
 
-const mockNotifications = [
+type NotificationType = 'task_completed' | 'task_overdue';
+
+interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  taskId?: string;
+  taskName?: string;
+  employeeName?: string;
+  timestamp: Date;
+  read: boolean;
+}
+
+const mockNotifications: Notification[] = [
   {
     id: '1',
     type: 'task_completed',
@@ -71,16 +85,17 @@ const mockNotifications = [
 ];
 
 export function NotificationsPage({ onBack, onNavigate, onLogout }: NotificationsPageProps) {
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
 
   const formatTimeAgo = (date: Date) => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
+    const diffMs = Math.max(0, Date.now() - date.getTime());
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 60) {
+    if (diffMins < 1) {
+      return 'Just now';
+    } else if (diffMins < 60) {
       return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
@@ -90,24 +105,24 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
   };
 
   const handleMarkAllRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
   const handleDeleteNotification = (id: string) => {
-    setNotifications(notifications.filter(n => n.id !== id));
+    setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  const handleNotificationClick = (notification: any) => {
+  const handleNotificationClick = (notification: Notification) => {
     // Mark as read
-    setNotifications(notifications.map(n => 
-      n.id === notification.id ? { ...n, read: true } : n
-    ));
+    setNotifications(prev =>
+      prev.map(n => (n.id === notification.id ? { ...n, read: true } : n))
+    );
 
     // Navigate to task detail if applicable
     if (notification.taskId) {
       const mockTask: Task = {
         id: notification.taskId,
-        name: notification.taskName,
+        name: notification.taskName ?? notification.title,
         qrCodeId: `QR-${notification.taskId.padStart(3, '0')}`,
         location: 'Location',
         description: 'Task description',
@@ -118,6 +133,7 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const todayString = new Date().toDateString();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
@@ -126,7 +142,7 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Go back">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div>
@@ -139,6 +155,7 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={handleMarkAllRead}
@@ -150,10 +167,12 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
               )}
               {onLogout && (
                 <Button
+                  type="button"
                   variant="ghost"
                   onClick={onLogout}
                   className="text-gray-700 hover:text-red-600 hover:bg-red-50"
                   title="Logout"
+                  aria-label="Logout"
                 >
                   <LogOut className="w-5 h-5" />
                 </Button>
@@ -198,10 +217,7 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
                 <div>
                   <p className="text-sm text-gray-600">Today</p>
                   <p className="text-2xl text-blue-900">
-                    {notifications.filter(n => {
-                      const today = new Date();
-                      return n.timestamp.toDateString() === today.toDateString();
-                    }).length}
+                    {notifications.filter(n => n.timestamp.toDateString() === todayString).length}
                   </p>
                 </div>
                 <Clock className="w-8 h-8 text-blue-600" />
@@ -231,6 +247,14 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
                         : 'border-blue-200 bg-blue-50 hover:border-blue-300'
                     }`}
                     onClick={() => handleNotificationClick(notification)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleNotificationClick(notification);
+                      }
+                    }}
                   >
                     {/* Icon */}
                     <div className={`flex-shrink-0 p-2 rounded-full ${
@@ -257,9 +281,11 @@ export function NotificationsPage({ onBack, onNavigate, onLogout }: Notification
                           )}
                         </div>
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Delete notification"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                           onClick={(e: MouseEvent<HTMLButtonElement>) => {
                             e.stopPropagation();
                             handleDeleteNotification(notification.id);

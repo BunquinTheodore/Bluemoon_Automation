@@ -13,7 +13,19 @@ import { toast } from 'sonner';
 interface OwnerSalesPageProps {
   onBack: () => void;
   onLogout: () => void;
-  onNavigate: (screen: any, task?: any, recipe?: any, financialReport?: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onNavigate?: (screen: any, task?: any, recipe?: any, financialReport?: any) => void;
+}
+
+interface ShiftFigures {
+  cash: number;
+  digitalWallet: number;
+  bank: number;
+  turnoverCash: number;
+  turnoverDigital: number;
+  turnoverBank: number;
+  imageUrl?: string;
+  imagePath?: string;
 }
 
 interface FinancialReport {
@@ -22,26 +34,8 @@ interface FinancialReport {
   managerId: string;
   managerName: string;
   date: string;
-  opening: {
-    cash: number;
-    digitalWallet: number;
-    bank: number;
-    turnoverCash: number;
-    turnoverDigital: number;
-    turnoverBank: number;
-    imageUrl?: string;
-    imagePath?: string;
-  };
-  closing: {
-    cash: number;
-    digitalWallet: number;
-    bank: number;
-    turnoverCash: number;
-    turnoverDigital: number;
-    turnoverBank: number;
-    imageUrl?: string;
-    imagePath?: string;
-  };
+  opening: ShiftFigures;
+  closing: ShiftFigures;
   managerFund: {
     amount: number;
     imageUrl?: string;
@@ -49,10 +43,55 @@ interface FinancialReport {
   };
   expenses: string;
   status: string;
-  submittedAt: any;
+  submittedAt: unknown;
 }
 
-export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageProps) {
+/** Coerce a Firestore value to a finite number (guards NaN/undefined in currency math). */
+const toAmount = (value: unknown): number => {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const normalizeShift = (raw: unknown): ShiftFigures => {
+  const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  return {
+    cash: toAmount(data.cash),
+    digitalWallet: toAmount(data.digitalWallet),
+    bank: toAmount(data.bank),
+    turnoverCash: toAmount(data.turnoverCash),
+    turnoverDigital: toAmount(data.turnoverDigital),
+    turnoverBank: toAmount(data.turnoverBank),
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : undefined,
+    imagePath: typeof data.imagePath === 'string' ? data.imagePath : undefined,
+  };
+};
+
+/** Format a Date as local YYYY-MM-DD (avoids the UTC shift from toISOString). */
+const toLocalDateKey = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/** Parse a YYYY-MM-DD string as a local date (new Date('YYYY-MM-DD') parses as UTC). */
+const parseLocalDate = (dateStr: string): Date => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  return new Date(dateStr);
+};
+
+const formatDate = (dateStr: string, options?: Intl.DateTimeFormatOptions): string => {
+  const d = parseLocalDate(dateStr);
+  return Number.isNaN(d.getTime()) ? dateStr || 'Unknown date' : d.toLocaleDateString('en-US', options);
+};
+
+const formatCurrency = (amount: number): string =>
+  toAmount(amount).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+export function OwnerSalesPage({ onBack, onLogout }: OwnerSalesPageProps) {
   const [reports, setReports] = useState<FinancialReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<FinancialReport | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -63,30 +102,48 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
   useEffect(() => {
     const q = query(collection(db, 'financialReports'), orderBy('date', 'desc'));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedReports: FinancialReport[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          reportId: data.reportId || doc.id,
-          managerId: data.managerId || '',
-          managerName: data.managerName || '',
-          date: data.date || '',
-          opening: data.opening || { cash: 0, digitalWallet: 0, bank: 0, turnoverCash: 0, turnoverDigital: 0, turnoverBank: 0 },
-          closing: data.closing || { cash: 0, digitalWallet: 0, bank: 0, turnoverCash: 0, turnoverDigital: 0, turnoverBank: 0 },
-          managerFund: data.managerFund || { amount: 0 },
-          expenses: data.expenses || '',
-          status: data.status || 'pending',
-          submittedAt: data.submittedAt,
-        };
-      });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const loadedReports: FinancialReport[] = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          const fund = (data.managerFund && typeof data.managerFund === 'object' ? data.managerFund : {}) as Record<string, unknown>;
+          return {
+            id: doc.id,
+            reportId: data.reportId || doc.id,
+            managerId: data.managerId || '',
+            managerName: data.managerName || '',
+            date: data.date || '',
+            opening: normalizeShift(data.opening),
+            closing: normalizeShift(data.closing),
+            managerFund: {
+              amount: toAmount(fund.amount),
+              imageUrl: typeof fund.imageUrl === 'string' ? fund.imageUrl : undefined,
+              imagePath: typeof fund.imagePath === 'string' ? fund.imagePath : undefined,
+            },
+            expenses: typeof data.expenses === 'string' ? data.expenses : '',
+            status: data.status || 'pending',
+            submittedAt: data.submittedAt,
+          };
+        });
 
-      setReports(loadedReports);
-      if (loadedReports.length > 0 && !selectedReport) {
-        setSelectedReport(loadedReports[0]);
+        setReports(loadedReports);
+        // Keep the selection in sync with live data (updated or deleted docs); default to newest.
+        setSelectedReport((current) => {
+          if (current) {
+            const refreshed = loadedReports.find((r) => r.id === current.id);
+            if (refreshed) return refreshed;
+          }
+          return loadedReports[0] ?? null;
+        });
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Failed to load financial reports:', error);
+        toast.error('Failed to load financial reports. Please try again.');
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
     return () => unsubscribe();
   }, []);
@@ -105,7 +162,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
 
   // Filter reports by selected date
   const filteredReports = selectedDate
-    ? reports.filter(r => r.date === selectedDate.toISOString().split('T')[0])
+    ? reports.filter((r) => r.date === toLocalDateKey(selectedDate))
     : reports;
 
   // Calculate totals for selected report
@@ -140,8 +197,6 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
   const dailyEarnings = openingTotal + closingTotal;
   const netSales = dailyEarnings * 0.88; // Daily Earnings - 12%
 
-  // Google Sheets export functionality is handled by GoogleSheetsExportButton component
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-50">
       {/* Header */}
@@ -149,7 +204,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button variant="ghost" size="icon" onClick={onBack} aria-label="Back">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div className="flex items-center gap-3">
@@ -231,7 +286,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                 <CardContent>
                   {filteredReports.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
-                      No reports found for the selected date
+                      {selectedDate ? 'No reports found for the selected date' : 'No financial reports submitted yet'}
                     </div>
                   ) : (
                     <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -241,7 +296,16 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.05 }}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={selectedReport?.id === report.id}
                           onClick={() => setSelectedReport(report)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedReport(report);
+                            }
+                          }}
                           className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
                             selectedReport?.id === report.id
                               ? 'border-cyan-500 bg-cyan-50'
@@ -251,7 +315,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           <div className="flex items-center justify-between">
                             <div>
                               <p className="font-semibold text-gray-900">
-                                {new Date(report.date).toLocaleDateString('en-US', {
+                                {formatDate(report.date, {
                                   weekday: 'short',
                                   month: 'short',
                                   day: 'numeric',
@@ -285,10 +349,10 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           <div>
                             <p className="text-sm text-gray-600">Daily Earnings</p>
                             <p className="text-3xl font-bold text-green-700">
-                              ₱{dailyEarnings.toLocaleString()}
+                              ₱{formatCurrency(dailyEarnings)}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {new Date(selectedReport.date).toLocaleDateString()}
+                              {formatDate(selectedReport.date)}
                             </p>
                           </div>
                           <TrendingUp className="w-12 h-12 text-green-600" />
@@ -303,7 +367,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           <div>
                             <p className="text-sm text-gray-600">Net Sales</p>
                             <p className="text-3xl font-bold text-blue-700">
-                              ₱{netSales.toLocaleString()}
+                              ₱{formatCurrency(netSales)}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
                               Daily Earnings - 12%
@@ -332,11 +396,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                             <div className="flex flex-col">
                               <span className="text-gray-600">Cash</span>
                               <span className="text-xs text-gray-400">
-                                ₱{selectedReport.opening.cash.toLocaleString()} + ₱{selectedReport.opening.turnoverCash.toLocaleString()}
+                                ₱{formatCurrency(selectedReport.opening.cash)} + ₱{formatCurrency(selectedReport.opening.turnoverCash)}
                               </span>
                             </div>
                             <span className="text-lg text-cyan-700 font-semibold">
-                              ₱{openingNetCash.toLocaleString()}
+                              ₱{formatCurrency(openingNetCash)}
                             </span>
                           </div>
                         </div>
@@ -347,11 +411,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                             <div className="flex flex-col">
                               <span className="text-gray-600">Digital Wallet</span>
                               <span className="text-xs text-gray-400">
-                                ₱{selectedReport.opening.digitalWallet.toLocaleString()} + ₱{selectedReport.opening.turnoverDigital.toLocaleString()}
+                                ₱{formatCurrency(selectedReport.opening.digitalWallet)} + ₱{formatCurrency(selectedReport.opening.turnoverDigital)}
                               </span>
                             </div>
                             <span className="text-lg text-cyan-700 font-semibold">
-                              ₱{openingNetDigital.toLocaleString()}
+                              ₱{formatCurrency(openingNetDigital)}
                             </span>
                           </div>
                         </div>
@@ -362,11 +426,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                             <div className="flex flex-col">
                               <span className="text-gray-600">Bank Amount</span>
                               <span className="text-xs text-gray-400">
-                                ₱{selectedReport.opening.bank.toLocaleString()} + ₱{selectedReport.opening.turnoverBank.toLocaleString()}
+                                ₱{formatCurrency(selectedReport.opening.bank)} + ₱{formatCurrency(selectedReport.opening.turnoverBank)}
                               </span>
                             </div>
                             <span className="text-lg text-cyan-700 font-semibold">
-                              ₱{openingNetBank.toLocaleString()}
+                              ₱{formatCurrency(openingNetBank)}
                             </span>
                           </div>
                         </div>
@@ -374,7 +438,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                         <div className="border-t-2 border-cyan-300 pt-3 mt-3">
                           <div className="flex justify-between items-center">
                             <span className="text-gray-800 font-semibold">Net Total</span>
-                            <span className="text-2xl font-bold text-cyan-800">₱{openingTotal.toLocaleString()}</span>
+                            <span className="text-2xl font-bold text-cyan-800">₱{formatCurrency(openingTotal)}</span>
                           </div>
                         </div>
                       </CardContent>
@@ -395,11 +459,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                     <div className="flex flex-col">
                       <span className="text-gray-600">Cash</span>
                       <span className="text-xs text-gray-400">
-                        ₱{selectedReport.closing.cash.toLocaleString()} + ₱{selectedReport.closing.turnoverCash.toLocaleString()}
+                        ₱{formatCurrency(selectedReport.closing.cash)} + ₱{formatCurrency(selectedReport.closing.turnoverCash)}
                       </span>
                     </div>
                     <span className="text-lg text-orange-700 font-semibold">
-                      ₱{closingNetCash.toLocaleString()}
+                      ₱{formatCurrency(closingNetCash)}
                     </span>
                   </div>
                 </div>
@@ -410,11 +474,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                     <div className="flex flex-col">
                       <span className="text-gray-600">Digital Wallet</span>
                       <span className="text-xs text-gray-400">
-                        ₱{selectedReport.closing.digitalWallet.toLocaleString()} + ₱{selectedReport.closing.turnoverDigital.toLocaleString()}
+                        ₱{formatCurrency(selectedReport.closing.digitalWallet)} + ₱{formatCurrency(selectedReport.closing.turnoverDigital)}
                       </span>
                     </div>
                     <span className="text-lg text-orange-700 font-semibold">
-                      ₱{closingNetDigital.toLocaleString()}
+                      ₱{formatCurrency(closingNetDigital)}
                     </span>
                   </div>
                 </div>
@@ -425,11 +489,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                     <div className="flex flex-col">
                       <span className="text-gray-600">Bank Amount</span>
                       <span className="text-xs text-gray-400">
-                        ₱{selectedReport.closing.bank.toLocaleString()} + ₱{selectedReport.closing.turnoverBank.toLocaleString()}
+                        ₱{formatCurrency(selectedReport.closing.bank)} + ₱{formatCurrency(selectedReport.closing.turnoverBank)}
                       </span>
                     </div>
                     <span className="text-lg text-orange-700 font-semibold">
-                      ₱{closingNetBank.toLocaleString()}
+                      ₱{formatCurrency(closingNetBank)}
                     </span>
                   </div>
                 </div>
@@ -437,7 +501,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                 <div className="border-t-2 border-orange-300 pt-3 mt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-gray-800 font-semibold">Net Total</span>
-                    <span className="text-2xl font-bold text-orange-800">₱{closingTotal.toLocaleString()}</span>
+                    <span className="text-2xl font-bold text-orange-800">₱{formatCurrency(closingTotal)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -456,7 +520,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
               <div className="flex items-center justify-between p-4 bg-white rounded-lg">
                 <span className="text-gray-700 font-medium">Fund Amount</span>
                 <span className="text-2xl font-bold text-purple-700">
-                  ₱{selectedReport.managerFund.amount.toLocaleString()}
+                  ₱{formatCurrency(selectedReport.managerFund.amount)}
                 </span>
               </div>
             </CardContent>
@@ -481,7 +545,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
         </motion.div>
 
         {/* Financial Report Photos */}
-        {selectedReport && (selectedReport.opening?.imageUrl || selectedReport.closing?.imageUrl || selectedReport.managerFund?.imageUrl) && (
+        {(selectedReport.opening.imageUrl || selectedReport.closing.imageUrl || selectedReport.managerFund.imageUrl) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -498,9 +562,11 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4">
                   {/* Opening Shift Photo */}
-                  {selectedReport.opening?.imageUrl && (
-                    <div
-                      className="cursor-pointer group"
+                  {selectedReport.opening.imageUrl && (
+                    <button
+                      type="button"
+                      aria-label="View opening shift photo"
+                      className="cursor-pointer group text-left w-full"
                       onClick={() => setFullscreenPhoto({
                         url: selectedReport.opening.imageUrl!,
                         title: 'Opening Shift'
@@ -518,13 +584,15 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           Opening Shift
                         </Badge>
                       </div>
-                    </div>
+                    </button>
                   )}
 
                   {/* Closing Shift Photo */}
-                  {selectedReport.closing?.imageUrl && (
-                    <div
-                      className="cursor-pointer group"
+                  {selectedReport.closing.imageUrl && (
+                    <button
+                      type="button"
+                      aria-label="View closing shift photo"
+                      className="cursor-pointer group text-left w-full"
                       onClick={() => setFullscreenPhoto({
                         url: selectedReport.closing.imageUrl!,
                         title: 'Closing Shift'
@@ -542,13 +610,15 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           Closing Shift
                         </Badge>
                       </div>
-                    </div>
+                    </button>
                   )}
 
                   {/* Manager Fund Photo */}
-                  {selectedReport.managerFund?.imageUrl && (
-                    <div
-                      className="cursor-pointer group"
+                  {selectedReport.managerFund.imageUrl && (
+                    <button
+                      type="button"
+                      aria-label="View manager fund photo"
+                      className="cursor-pointer group text-left w-full"
                       onClick={() => setFullscreenPhoto({
                         url: selectedReport.managerFund.imageUrl!,
                         title: 'Manager Fund'
@@ -566,19 +636,10 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                           Manager Fund
                         </Badge>
                       </div>
-                    </div>
+                    </button>
                   )}
                 </div>
 
-                {/* Show message if no photos available */}
-                {!selectedReport.opening?.imageUrl && !selectedReport.closing?.imageUrl && !selectedReport.managerFund?.imageUrl && (
-                  <div className="flex flex-col items-center justify-center p-8 space-y-4">
-                    <Camera className="w-16 h-16 text-gray-300" />
-                    <p className="text-gray-500 text-center">
-                      No photos available for this report
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </motion.div>
@@ -605,6 +666,7 @@ export function OwnerSalesPage({ onBack, onLogout, onNavigate }: OwnerSalesPageP
                 onClick={() => setFullscreenPhoto(null)}
                 variant="ghost"
                 size="icon"
+                aria-label="Close photo"
                 className="bg-white hover:bg-gray-100 rounded-full shadow-2xl"
               >
                 <X className="w-6 h-6 text-gray-900" />

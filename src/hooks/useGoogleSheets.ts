@@ -5,13 +5,13 @@
  * for Google Sheets API.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   exportReportToSheets,
   getSheetUrl,
   initializeGoogleAPI,
-  isAuthenticated,
+  isAuthenticated as hasValidToken,
   signInToGoogle,
   signOut,
   type FinancialReport,
@@ -22,9 +22,14 @@ export interface UseGoogleSheetsReturn {
   isLoading: boolean;
   isInitializing: boolean;
   error: string | null;
-  signIn: () => Promise<void>;
+  /** Resolves to true when a valid token is available afterwards. */
+  signIn: () => Promise<boolean>;
   signOut: () => Promise<void>;
   exportReport: (report: FinancialReport) => Promise<void>;
+}
+
+function messageOf(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function useGoogleSheets(): UseGoogleSheetsReturn {
@@ -32,94 +37,89 @@ export function useGoogleSheets(): UseGoogleSheetsReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   // Initialize Google API on mount
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
-    async function initialize() {
-      try {
-        await initializeGoogleAPI();
-
-        // Check if already authenticated
-        if (mounted) {
-          const authStatus = isAuthenticated();
-          setAuthenticated(authStatus);
-          setIsInitializing(false);
+    initializeGoogleAPI()
+      .then(() => {
+        if (mountedRef.current) {
+          setAuthenticated(hasValidToken());
         }
-
-        // Listen for auth state changes
-        if (window.gapi && window.gapi.auth2) {
-          const authInstance = window.gapi.auth2.getAuthInstance();
-          if (authInstance) {
-            authInstance.isSignedIn.listen((signedIn: boolean) => {
-              if (mounted) {
-                setAuthenticated(signedIn);
-              }
-            });
-          }
-        }
-      } catch (err: any) {
+      })
+      .catch((err: unknown) => {
         console.error('Failed to initialize Google API:', err);
-        if (mounted) {
-          setError(err.message || 'Failed to initialize Google Sheets');
+        if (mountedRef.current) {
+          setError(messageOf(err, 'Failed to initialize Google Sheets'));
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current) {
           setIsInitializing(false);
         }
-      }
-    }
-
-    initialize();
+      });
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
     };
   }, []);
 
   /**
    * Sign in to Google
    */
-  const handleSignIn = async () => {
+  const handleSignIn = useCallback(async (): Promise<boolean> => {
     setIsLoading(true);
     setError(null);
 
     try {
       await signInToGoogle();
-      setAuthenticated(true);
+      if (mountedRef.current) setAuthenticated(true);
       toast.success('Connected to Google Sheets!');
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to sign in';
-      setError(errorMessage);
-      toast.error(errorMessage);
+      return true;
+    } catch (err: unknown) {
+      const errorMessage = messageOf(err, 'Failed to sign in');
+      if (mountedRef.current) setError(errorMessage);
+      if (errorMessage === 'Sign-in cancelled') {
+        toast.info(errorMessage);
+      } else {
+        toast.error(errorMessage);
+      }
+      return false;
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) setIsLoading(false);
     }
-  };
+  }, []);
 
   /**
    * Sign out from Google
    */
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
       await signOut();
-      setAuthenticated(false);
+      if (mountedRef.current) setAuthenticated(false);
       toast.success('Disconnected from Google Sheets');
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to sign out';
-      setError(errorMessage);
+    } catch (err: unknown) {
+      const errorMessage = messageOf(err, 'Failed to sign out');
+      if (mountedRef.current) setError(errorMessage);
       toast.error(errorMessage);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) setIsLoading(false);
     }
-  };
+  }, []);
 
   /**
    * Export financial report to Google Sheets
    */
-  const handleExportReport = async (report: FinancialReport) => {
-    if (!authenticated) {
+  const handleExportReport = useCallback(async (report: FinancialReport) => {
+    // Check the live token rather than React state so a sign-in that just
+    // completed (or a token that just expired) is reflected immediately.
+    if (!hasValidToken()) {
+      if (mountedRef.current) setAuthenticated(false);
       toast.error('Please connect to Google Sheets first');
       return;
     }
@@ -135,26 +135,27 @@ export function useGoogleSheets(): UseGoogleSheetsReturn {
         description: `Report for ${report.date} has been saved`,
         action: {
           label: 'View Sheet',
-          onClick: () => window.open(sheetUrl, '_blank'),
+          onClick: () => window.open(sheetUrl, '_blank', 'noopener,noreferrer'),
         },
         duration: 5000,
       });
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to export report';
+    } catch (err: unknown) {
+      const errorMessage = messageOf(err, 'Failed to export report');
 
-      // Don't show error toast if user cancelled duplicate export
       if (errorMessage.includes('Export cancelled')) {
         toast.info('Export cancelled');
       } else {
-        setError(errorMessage);
-        toast.error(errorMessage, {
-          duration: 5000,
-        });
+        if (mountedRef.current) {
+          setError(errorMessage);
+          // A 401/403 clears the stored token; reflect that in the UI
+          setAuthenticated(hasValidToken());
+        }
+        toast.error(errorMessage, { duration: 5000 });
       }
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) setIsLoading(false);
     }
-  };
+  }, []);
 
   return {
     isAuthenticated: authenticated,

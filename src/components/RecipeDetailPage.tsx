@@ -32,7 +32,7 @@ export function RecipeDetailPage({ recipe, onBack, onLogout }: RecipeDetailPageP
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={onBack}>
+              <Button variant="ghost" size="icon" onClick={onBack} aria-label="Back to recipes">
                 <ArrowLeft className="w-5 h-5" />
               </Button>
               <div className="flex items-center gap-3">
@@ -67,13 +67,20 @@ export function RecipeDetailPage({ recipe, onBack, onLogout }: RecipeDetailPageP
           <Card className="border-amber-100 overflow-hidden">
             <CardContent className="p-0">
               <div className="relative aspect-video bg-black">
-                <iframe
-                  className="w-full h-full"
-                  src={recipe.videoUrl}
-                  title={recipe.name}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
+                {recipe.videoUrl ? (
+                  <iframe
+                    className="w-full h-full"
+                    src={recipe.videoUrl}
+                    title={`${recipe.name} video tutorial`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    referrerPolicy="strict-origin-when-cross-origin"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-300 text-sm">
+                    Video tutorial not available
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -140,7 +147,7 @@ export function RecipeDetailPage({ recipe, onBack, onLogout }: RecipeDetailPageP
           {/* Tools Needed - Collapsible */}
           <Collapsible open={toolsOpen} onOpenChange={setToolsOpen}>
             <Card className="border-amber-100">
-              <CollapsibleTrigger className="w-full">
+              <CollapsibleTrigger className="w-full text-left">
                 <CardHeader className="cursor-pointer hover:bg-amber-50 transition-colors">
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2">

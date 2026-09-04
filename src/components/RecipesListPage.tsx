@@ -1,14 +1,14 @@
 import { ArrowLeft, Clock, Coffee, Play, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
-import { Recipe, Screen } from '../App';
+import { Recipe, Screen, Task } from '../App';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Input } from './ui/input';
 
 interface RecipesListPageProps {
-  onNavigate: (screen: Screen, task?: any, recipe?: Recipe) => void;
+  onNavigate: (screen: Screen, task?: Task, recipe?: Recipe) => void;
   onLogout: () => void;
   onBack: () => void;
 }
@@ -166,15 +166,18 @@ const mockRecipes: Recipe[] = [
   },
 ];
 
-export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPageProps) {
+export function RecipesListPage({ onNavigate, onBack }: RecipesListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredRecipes = mockRecipes
     .filter(recipe =>
-      recipe.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      recipe.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      recipe.description.toLowerCase().includes(searchQuery.toLowerCase())
+      !normalizedQuery ||
+      recipe.name.toLowerCase().includes(normalizedQuery) ||
+      recipe.category.toLowerCase().includes(normalizedQuery) ||
+      recipe.description.toLowerCase().includes(normalizedQuery) ||
+      recipe.ingredients.some(ingredient => ingredient.toLowerCase().includes(normalizedQuery))
     )
     .filter(recipe => !activeCategory || recipe.category === activeCategory);
 
@@ -217,7 +220,8 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
           <div className="relative max-w-2xl mx-auto">
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <Input
-              type="text"
+              type="search"
+              aria-label="Search recipes"
               placeholder="Search recipes by name, category, or ingredients..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -231,10 +235,19 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
           {categories.map((category) => (
             <Badge
               key={category}
+              role="button"
+              tabIndex={0}
+              aria-pressed={activeCategory === category}
               variant={activeCategory === category ? 'default' : 'outline'}
               onClick={() =>
                 setActiveCategory(activeCategory === category ? null : category)
               }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setActiveCategory(activeCategory === category ? null : category);
+                }
+              }}
               className={
                 activeCategory === category
                   ? 'px-4 py-2 cursor-pointer bg-amber-600 text-white border-amber-600'
@@ -256,7 +269,16 @@ export function RecipesListPage({ onNavigate, onLogout, onBack }: RecipesListPag
               transition={{ delay: index * 0.05 }}
               whileHover={{ scale: 1.02 }}
               className="cursor-pointer"
+              role="button"
+              tabIndex={0}
+              aria-label={`Open recipe: ${recipe.name}`}
               onClick={() => onNavigate('recipe-detail', undefined, recipe)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onNavigate('recipe-detail', undefined, recipe);
+                }
+              }}
             >
               <Card className="overflow-hidden border-amber-100 hover:shadow-2xl transition-all h-full">
                 {/* Video Preview (no photo thumbnail, gradient background only) */}

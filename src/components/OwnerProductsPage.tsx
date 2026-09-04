@@ -6,7 +6,8 @@ import {
   setDoc,
   serverTimestamp,
   deleteDoc,
-  getDocs,
+  updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
@@ -16,6 +17,10 @@ import {
   Plus,
   Trash2,
   PackagePlus,
+  Package,
+  Edit,
+  Check,
+  X,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
@@ -31,6 +36,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from './ui/table';
 import { Product, Ingredient, ProductIngredient } from '../App';
 
 interface OwnerProductsPageProps {
@@ -40,20 +53,18 @@ interface OwnerProductsPageProps {
 
 // Category color mapping
 const categoryColors: Record<string, string> = {
-  'hot-beverage': 'bg-red-100 text-red-800',
-  'cold-beverage': 'bg-blue-100 text-blue-800',
-  pastry: 'bg-amber-100 text-amber-800',
-  food: 'bg-green-100 text-green-800',
-  other: 'bg-gray-100 text-gray-800',
+  coffee: 'bg-amber-100 text-amber-800',
+  'non-coffee': 'bg-blue-100 text-blue-800',
+  snacks: 'bg-green-100 text-green-800',
+  'moon-bowls': 'bg-purple-100 text-purple-800',
 };
 
 // Category display names
 const categoryNames: Record<string, string> = {
-  'hot-beverage': 'Hot Beverage',
-  'cold-beverage': 'Cold Beverage',
-  pastry: 'Pastry',
-  food: 'Food',
-  other: 'Other',
+  coffee: 'Coffee',
+  'non-coffee': 'Non-Coffee',
+  snacks: 'Snacks',
+  'moon-bowls': 'Moon Bowls',
 };
 
 export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) {
@@ -65,24 +76,29 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
   >({});
   const [loading, setLoading] = useState(true);
 
+  // View state - 'products' or 'ingredients'
+  const [currentView, setCurrentView] = useState<'products' | 'ingredients'>('products');
+
   // Dialog states
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [isAddIngredientOpen, setIsAddIngredientOpen] = useState(false);
   const [isManageIngredientsOpen, setIsManageIngredientsOpen] = useState(false);
+  const [isEditProductOpen, setIsEditProductOpen] = useState(false);
+  const [isDeleteProductOpen, setIsDeleteProductOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
-  // Debug dialog state
-  useEffect(() => {
-    console.log('Dialog state changed:', { isAddProductOpen, isAddIngredientOpen, isManageIngredientsOpen });
-  }, [isAddProductOpen, isAddIngredientOpen, isManageIngredientsOpen]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Form states - Add Product
   const [newProductName, setNewProductName] = useState('');
   const [newProductCategory, setNewProductCategory] = useState('');
 
+  // Form states - Edit Product
+  const [editProductName, setEditProductName] = useState('');
+  const [editProductCategory, setEditProductCategory] = useState('');
+
   // Form states - Add Ingredient
   const [newIngredientName, setNewIngredientName] = useState('');
-  const [newIngredientQuantity, setNewIngredientQuantity] = useState('');
   const [newIngredientUnit, setNewIngredientUnit] = useState('');
 
   // Form states - Manage Product Ingredients
@@ -126,7 +142,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
           return {
             id: doc.id,
             name: data.name || '',
-            quantity: data.quantity || 0,
+            quantity: Number(data.quantity) || 0,
             unit: data.unit || '',
             createdAt: data.createdAt?.toDate() || new Date(),
             lastUpdated: data.lastUpdated?.toDate() || new Date(),
@@ -142,13 +158,25 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
     return () => unsubscribe();
   }, []);
 
-  // Load product ingredients for all products
+  // Load product ingredients for all products (re-subscribe only when the set of product ids changes)
+  const productIdsKey = products.map((p) => p.id).sort().join('|');
   useEffect(() => {
-    if (products.length === 0) return;
+    const productIds = productIdsKey ? productIdsKey.split('|') : [];
 
-    const unsubscribes = products.map((product) => {
+    // Drop cached ingredient lists for products that no longer exist
+    setProductIngredients((prev) => {
+      const next: Record<string, ProductIngredient[]> = {};
+      productIds.forEach((id) => {
+        if (prev[id]) next[id] = prev[id];
+      });
+      return next;
+    });
+
+    if (productIds.length === 0) return;
+
+    const unsubscribes = productIds.map((productId) => {
       return onSnapshot(
-        collection(db, 'products', product.id, 'ingredients'),
+        collection(db, 'products', productId, 'ingredients'),
         (snapshot) => {
           const loadedIngredients: ProductIngredient[] = snapshot.docs.map((doc) => {
             const data = doc.data();
@@ -156,14 +184,17 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               id: doc.id,
               ingredientId: data.ingredientId || '',
               ingredientName: data.ingredientName || '',
-              quantity: data.quantity || 0,
+              quantity: Number(data.quantity) || 0,
               unit: data.unit || '',
             };
           });
           setProductIngredients((prev) => ({
             ...prev,
-            [product.id]: loadedIngredients,
+            [productId]: loadedIngredients,
           }));
+        },
+        (error) => {
+          console.error('Error fetching product ingredients:', error);
         }
       );
     });
@@ -171,7 +202,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
     return () => {
       unsubscribes.forEach((unsub) => unsub());
     };
-  }, [products]);
+  }, [productIdsKey]);
 
   // Handler: Add Product
   const handleAddProduct = async () => {
@@ -184,6 +215,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
       return;
     }
 
+    setIsSaving(true);
     try {
       const productsCollection = collection(db, 'products');
       const productDocRef = doc(productsCollection);
@@ -203,6 +235,8 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
     } catch (error) {
       console.error('Error adding product:', error);
       toast.error('Failed to add product');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -212,15 +246,12 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
       toast.error('Please enter an ingredient name');
       return;
     }
-    if (!newIngredientQuantity || parseFloat(newIngredientQuantity) <= 0) {
-      toast.error('Please enter a valid quantity');
-      return;
-    }
     if (!newIngredientUnit) {
       toast.error('Please select a unit');
       return;
     }
 
+    setIsSaving(true);
     try {
       const ingredientsCollection = collection(db, 'ingredients');
       const ingredientDocRef = doc(ingredientsCollection);
@@ -228,7 +259,6 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
       await setDoc(ingredientDocRef, {
         ingredientId: ingredientDocRef.id,
         name: newIngredientName.trim(),
-        quantity: parseFloat(newIngredientQuantity),
         unit: newIngredientUnit,
         createdAt: serverTimestamp(),
         lastUpdated: serverTimestamp(),
@@ -236,12 +266,99 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
 
       toast.success('Ingredient added to database!');
       setNewIngredientName('');
-      setNewIngredientQuantity('');
       setNewIngredientUnit('');
       setIsAddIngredientOpen(false);
     } catch (error) {
       console.error('Error adding ingredient:', error);
       toast.error('Failed to add ingredient');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handler: Delete Ingredient from master database
+  const handleDeleteIngredient = async (ingredientId: string, ingredientName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${ingredientName}" from the database?`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'ingredients', ingredientId));
+      toast.success('Ingredient deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting ingredient:', error);
+      toast.error('Failed to delete ingredient');
+    }
+  };
+
+  // Handler: Edit Product
+  const handleEditProduct = (product: Product) => {
+    setSelectedProduct(product);
+    setEditProductName(product.name);
+    setEditProductCategory(product.category);
+    setIsEditProductOpen(true);
+  };
+
+  // Handler: Save Edited Product
+  const handleSaveEditProduct = async () => {
+    if (!selectedProduct) return;
+    if (!editProductName.trim()) {
+      toast.error('Please enter a product name');
+      return;
+    }
+    if (!editProductCategory) {
+      toast.error('Please select a category');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const productDocRef = doc(db, 'products', selectedProduct.id);
+      await updateDoc(productDocRef, {
+        name: editProductName.trim(),
+        category: editProductCategory,
+        lastUpdated: serverTimestamp(),
+      });
+
+      toast.success('Product updated successfully!');
+      setIsEditProductOpen(false);
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error('Error updating product:', error);
+      toast.error('Failed to update product');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handler: Open Delete Product Confirmation
+  const handleOpenDeleteProduct = (product: Product) => {
+    setSelectedProduct(product);
+    setIsDeleteProductOpen(true);
+  };
+
+  // Handler: Delete Product
+  const handleDeleteProduct = async () => {
+    if (!selectedProduct) return;
+
+    setIsSaving(true);
+    try {
+      // Delete the product's ingredient subcollection docs together with the product
+      const batch = writeBatch(db);
+      (productIngredients[selectedProduct.id] || []).forEach((ing) => {
+        batch.delete(doc(db, 'products', selectedProduct.id, 'ingredients', ing.id));
+      });
+      batch.delete(doc(db, 'products', selectedProduct.id));
+      await batch.commit();
+
+      toast.success('Product deleted successfully!');
+      setIsDeleteProductOpen(false);
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      toast.error('Failed to delete product');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -252,17 +369,28 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
       toast.error('Please select an ingredient');
       return;
     }
-    if (!ingredientQuantity || parseFloat(ingredientQuantity) <= 0) {
+    const quantity = parseFloat(ingredientQuantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
       toast.error('Please enter a valid quantity');
       return;
     }
 
+    const selectedIng = ingredients.find((i) => i.id === selectedIngredientId);
+    if (!selectedIng) {
+      toast.error('Selected ingredient not found');
+      return;
+    }
+
+    const alreadyAdded = (productIngredients[selectedProduct.id] || []).some(
+      (ing) => ing.ingredientId === selectedIng.id
+    );
+    if (alreadyAdded) {
+      toast.error(`${selectedIng.name} is already in this product. Remove it first to change the quantity.`);
+      return;
+    }
+
+    setIsSaving(true);
     try {
-      const selectedIng = ingredients.find((i) => i.id === selectedIngredientId);
-      if (!selectedIng) {
-        toast.error('Selected ingredient not found');
-        return;
-      }
 
       const productIngredientsCollection = collection(
         db,
@@ -275,7 +403,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
       await setDoc(productIngredientDocRef, {
         ingredientId: selectedIng.id,
         ingredientName: selectedIng.name,
-        quantity: parseFloat(ingredientQuantity),
+        quantity,
         unit: selectedIng.unit,
       });
 
@@ -285,6 +413,8 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
     } catch (error) {
       console.error('Error adding ingredient to product:', error);
       toast.error('Failed to add ingredient to product');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -303,11 +433,13 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
   // Handler: Open manage ingredients dialog
   const handleManageIngredients = (product: Product) => {
     setSelectedProduct(product);
+    setSelectedIngredientId('');
+    setIngredientQuantity('');
     setIsManageIngredientsOpen(true);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-pink-50">
+    <div className="min-h-screen bg-linear-to-br from-pink-50 via-white to-pink-50">
       {/* Header */}
       <header className="bg-white border-b border-pink-100 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -317,6 +449,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                 variant="ghost"
                 size="icon"
                 onClick={onBack}
+                aria-label="Go back"
                 className="text-pink-600 hover:text-pink-700 hover:bg-pink-50"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -334,6 +467,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
             <Button
               variant="ghost"
               onClick={onLogout}
+              aria-label="Log out"
               className="text-gray-700 hover:text-red-600 hover:bg-red-50"
             >
               <LogOut className="w-5 h-5" />
@@ -344,53 +478,112 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-          <Card className="border-pink-200">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Total Products</p>
-                  <p className="text-3xl font-bold text-pink-700">{products.length}</p>
-                </div>
-                <ShoppingBag className="w-10 h-10 text-pink-600" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-pink-200">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">Master Ingredients</p>
-                  <p className="text-3xl font-bold text-pink-700">{ingredients.length}</p>
-                </div>
-                <PackagePlus className="w-10 h-10 text-pink-600" />
-              </div>
-            </CardContent>
-          </Card>
+        {/* View Toggle - Pill Style */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex rounded-full bg-cyan-100 p-1">
+            <button
+              type="button"
+              aria-pressed={currentView === 'products'}
+              onClick={() => setCurrentView('products')}
+              className={`flex items-center gap-2 px-6 py-2 rounded-full text-sm font-medium transition-all ${
+                currentView === 'products'
+                  ? 'bg-white text-cyan-700 shadow-sm'
+                  : 'text-cyan-600 hover:text-cyan-700'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              Products
+            </button>
+            <button
+              type="button"
+              aria-pressed={currentView === 'ingredients'}
+              onClick={() => setCurrentView('ingredients')}
+              className={`flex items-center gap-2 px-6 py-2 rounded-full text-sm font-medium transition-all ${
+                currentView === 'ingredients'
+                  ? 'bg-white text-cyan-700 shadow-sm'
+                  : 'text-cyan-600 hover:text-cyan-700'
+              }`}
+            >
+              <PackagePlus className="w-4 h-4" />
+              Master Ingredients
+            </button>
+          </div>
         </div>
 
+        {/* Master Ingredients View */}
+        {currentView === 'ingredients' && (
+          <>
+            {/* Add Ingredient Button */}
+            <div className="mb-6">
+              <Button
+                onClick={() => setIsAddIngredientOpen(true)}
+                style={{ backgroundColor: '#db2777', color: '#ffffff' }}
+                className="hover:bg-pink-700"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Ingredient
+              </Button>
+            </div>
+
+            {/* Ingredients Table */}
+            {ingredients.length === 0 ? (
+              <div className="text-center py-12">
+                <PackagePlus className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                <p className="text-lg font-medium text-gray-600">No ingredients in database</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  Click "Add New Ingredient" to add your first ingredient
+                </p>
+              </div>
+            ) : (
+              <Card className="border-pink-200">
+                <CardContent className="pt-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="font-semibold">Ingredient Name</TableHead>
+                        <TableHead className="font-semibold">Unit</TableHead>
+                        <TableHead className="font-semibold text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ingredients.map((ingredient) => (
+                        <TableRow key={ingredient.id}>
+                          <TableCell className="font-medium">{ingredient.name}</TableCell>
+                          <TableCell>{ingredient.unit}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteIngredient(ingredient.id, ingredient.name)}
+                              aria-label={`Delete ${ingredient.name}`}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* Products View */}
+        {currentView === 'products' && (
+          <>
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-3 mb-6">
           <Button
             type="button"
-            onClick={() => {
-              console.log('Add Product clicked!');
-              setIsAddProductOpen(true);
-            }}
+            onClick={() => setIsAddProductOpen(true)}
             style={{ backgroundColor: '#db2777', color: '#ffffff' }}
             className="hover:bg-pink-700"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Product
-          </Button>
-          <Button
-            onClick={() => setIsAddIngredientOpen(true)}
-            variant="outline"
-            className="border-pink-300 text-pink-700 hover:bg-pink-50"
-          >
-            <PackagePlus className="w-4 h-4 mr-2" />
-            Manage Master Ingredients
           </Button>
         </div>
 
@@ -425,7 +618,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                       {/* Category Badge */}
                       <Badge
                         className={`absolute top-3 right-3 ${
-                          categoryColors[product.category] || categoryColors.other
+                          categoryColors[product.category] || 'bg-gray-100 text-gray-800'
                         }`}
                       >
                         {categoryNames[product.category] || product.category}
@@ -460,21 +653,43 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                         )}
                       </div>
 
-                      {/* Manage Button */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleManageIngredients(product)}
-                        className="w-full border-pink-300 text-pink-700 hover:bg-pink-50"
-                      >
-                        Manage Ingredients
-                      </Button>
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleManageIngredients(product)}
+                          className="flex-1 border-pink-300 text-pink-700 hover:bg-pink-50"
+                        >
+                          Manage Ingredients
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditProduct(product)}
+                          aria-label={`Edit ${product.name}`}
+                          className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenDeleteProduct(product)}
+                          aria-label={`Delete ${product.name}`}
+                          className="border-red-300 text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
               );
             })}
           </div>
+        )}
+          </>
         )}
       </main>
 
@@ -502,6 +717,8 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               width: '100%',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
             }}
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>
@@ -524,11 +741,10 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent style={{ zIndex: 10000 }}>
-                  <SelectItem value="hot-beverage">Hot Beverage</SelectItem>
-                  <SelectItem value="cold-beverage">Cold Beverage</SelectItem>
-                  <SelectItem value="pastry">Pastry</SelectItem>
-                  <SelectItem value="food">Food</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="coffee">Coffee</SelectItem>
+                  <SelectItem value="non-coffee">Non-Coffee</SelectItem>
+                  <SelectItem value="snacks">Snacks</SelectItem>
+                  <SelectItem value="moon-bowls">Moon Bowls</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -538,6 +754,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               </Button>
               <Button
                 onClick={handleAddProduct}
+                disabled={isSaving}
                 style={{ backgroundColor: '#db2777', color: '#ffffff' }}
                 className="hover:bg-pink-700"
               >
@@ -572,6 +789,8 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               width: '100%',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
             }}
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>
@@ -587,35 +806,22 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                 style={{ marginTop: '0.25rem' }}
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-              <div>
-                <Label htmlFor="ingredient-quantity">Stock Quantity</Label>
-                <Input
-                  id="ingredient-quantity"
-                  type="number"
-                  placeholder="0"
-                  value={newIngredientQuantity}
-                  onChange={(e) => setNewIngredientQuantity(e.target.value)}
-                  style={{ marginTop: '0.25rem' }}
-                />
-              </div>
-              <div>
-                <Label htmlFor="ingredient-unit">Unit</Label>
-                <Select value={newIngredientUnit} onValueChange={setNewIngredientUnit}>
-                  <SelectTrigger id="ingredient-unit" style={{ marginTop: '0.25rem' }}>
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent style={{ zIndex: 10000 }}>
-                    <SelectItem value="kg">Kilograms (kg)</SelectItem>
-                    <SelectItem value="g">Grams (g)</SelectItem>
-                    <SelectItem value="L">Liters (L)</SelectItem>
-                    <SelectItem value="ml">Milliliters (ml)</SelectItem>
-                    <SelectItem value="pcs">Pieces (pcs)</SelectItem>
-                    <SelectItem value="bags">Bags</SelectItem>
-                    <SelectItem value="units">Units</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <Label htmlFor="ingredient-unit">Unit</Label>
+              <Select value={newIngredientUnit} onValueChange={setNewIngredientUnit}>
+                <SelectTrigger id="ingredient-unit" style={{ marginTop: '0.25rem' }}>
+                  <SelectValue placeholder="Select unit" />
+                </SelectTrigger>
+                <SelectContent style={{ zIndex: 10000 }}>
+                  <SelectItem value="kg">Kilograms (kg)</SelectItem>
+                  <SelectItem value="g">Grams (g)</SelectItem>
+                  <SelectItem value="L">Liters (L)</SelectItem>
+                  <SelectItem value="ml">Milliliters (ml)</SelectItem>
+                  <SelectItem value="pcs">Pieces (pcs)</SelectItem>
+                  <SelectItem value="bags">Bags</SelectItem>
+                  <SelectItem value="units">Units</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <Button variant="outline" onClick={() => setIsAddIngredientOpen(false)}>
@@ -623,6 +829,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               </Button>
               <Button
                 onClick={handleAddIngredient}
+                disabled={isSaving}
                 style={{ backgroundColor: '#db2777', color: '#ffffff' }}
                 className="hover:bg-pink-700"
               >
@@ -633,8 +840,133 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
         </div>
       )}
 
+      {/* Edit Product Dialog */}
+      {isEditProductOpen && selectedProduct && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+          onClick={() => setIsEditProductOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '0.5rem',
+              padding: '1.5rem',
+              maxWidth: '500px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+              Edit Product
+            </h2>
+            <div style={{ marginBottom: '1rem' }}>
+              <Label htmlFor="edit-product-name">Product Name</Label>
+              <Input
+                id="edit-product-name"
+                placeholder="e.g., Cappuccino"
+                value={editProductName}
+                onChange={(e) => setEditProductName(e.target.value)}
+                style={{ marginTop: '0.25rem' }}
+              />
+            </div>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <Label htmlFor="edit-product-category">Category</Label>
+              <Select value={editProductCategory} onValueChange={setEditProductCategory}>
+                <SelectTrigger id="edit-product-category" style={{ marginTop: '0.25rem' }}>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent style={{ zIndex: 10000 }}>
+                  <SelectItem value="coffee">Coffee</SelectItem>
+                  <SelectItem value="non-coffee">Non-Coffee</SelectItem>
+                  <SelectItem value="snacks">Snacks</SelectItem>
+                  <SelectItem value="moon-bowls">Moon Bowls</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <Button variant="outline" onClick={() => setIsEditProductOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveEditProduct}
+                disabled={isSaving}
+                style={{ backgroundColor: '#db2777', color: '#ffffff' }}
+                className="hover:bg-pink-700"
+              >
+                <Check className="w-4 h-4 mr-2" />
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Product Confirmation Dialog */}
+      {isDeleteProductOpen && selectedProduct && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+          onClick={() => setIsDeleteProductOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '0.5rem',
+              padding: '1.5rem',
+              maxWidth: '400px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem', color: '#dc2626' }}>
+              Delete Product
+            </h2>
+            <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
+              Are you sure you want to delete <strong>"{selectedProduct.name}"</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <Button variant="outline" onClick={() => setIsDeleteProductOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteProduct}
+                disabled={isSaving}
+                style={{ backgroundColor: '#dc2626', color: '#ffffff' }}
+                className="hover:bg-red-700"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Product
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Manage Product Ingredients Modal */}
-      {isManageIngredientsOpen && (
+      {isManageIngredientsOpen && selectedProduct && (
         <div
           style={{
             position: 'fixed',
@@ -659,23 +991,24 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               overflowY: 'auto',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
             }}
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>
-              Manage Ingredients for {selectedProduct?.name}
+              Manage Ingredients for {selectedProduct.name}
             </h2>
 
             {/* Current Ingredients */}
             <div style={{ marginBottom: '1.5rem' }}>
               <Label className="text-base font-semibold">Current Ingredients:</Label>
-              {selectedProduct && (productIngredients[selectedProduct.id]?.length || 0) === 0 ? (
+              {(productIngredients[selectedProduct.id]?.length || 0) === 0 ? (
                 <p className="text-sm text-gray-500 italic" style={{ marginTop: '0.5rem' }}>
                   No ingredients added yet
                 </p>
               ) : (
                 <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {selectedProduct &&
-                    productIngredients[selectedProduct.id]?.map((ing) => (
+                  {productIngredients[selectedProduct.id]?.map((ing) => (
                       <div
                         key={ing.id}
                         className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200"
@@ -690,6 +1023,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                           variant="ghost"
                           size="sm"
                           onClick={() => handleRemoveIngredient(selectedProduct.id, ing.id)}
+                          aria-label={`Remove ${ing.ingredientName}`}
                           className="text-red-600 hover:text-red-700 hover:bg-red-50"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -727,6 +1061,8 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
                   <Input
                     id="ingredient-qty"
                     type="number"
+                    min="0"
+                    step="any"
                     placeholder="0"
                     value={ingredientQuantity}
                     onChange={(e) => setIngredientQuantity(e.target.value)}
@@ -736,6 +1072,7 @@ export function OwnerProductsPage({ onBack, onLogout }: OwnerProductsPageProps) 
               </div>
               <Button
                 onClick={handleAddIngredientToProduct}
+                disabled={isSaving}
                 style={{ backgroundColor: '#db2777', color: '#ffffff', marginTop: '0.75rem' }}
                 className="w-full hover:bg-pink-700"
               >

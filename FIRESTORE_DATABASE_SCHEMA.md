@@ -551,6 +551,42 @@ System-wide settings and configuration.
 
 ---
 
+## 15. **cupInventoryRecords** Collection
+Daily cup inventory records submitted by team members, monitored by managers and owners.
+
+### Document Structure: `/cupInventoryRecords/{recordId}`
+```javascript
+{
+  recordId: string,             // Derived key: {branchSlug}_{YYYY-MM-DD}
+  branchId: string,             // Slug form of branch name
+  branchName: string,           // Human-readable branch/store name
+  date: string,                 // YYYY-MM-DD
+
+  openingCups: number,          // Opening cup count
+  cupsSoldToday: number,        // Cups sold for the date
+  expectedEndingCups: number,   // openingCups - cupsSoldToday
+  actualEndingCups: number,     // Manual tally at end of day
+  difference: number,           // actualEndingCups - expectedEndingCups
+  hasDiscrepancy: boolean,
+  discrepancyStatus: string,    // "OK" | "Inventory Discrepancy"
+
+  submittedByUserId: string,
+  submittedByName: string,
+  updatedByUserId: string,
+  updatedByName: string,
+
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
+**Indexes:**
+- `date` (DESC)
+- `branchId` (ASC), `date` (DESC)
+- `hasDiscrepancy` (ASC), `date` (DESC)
+
+---
+
 ## Storage Buckets Organization
 
 ### Firebase Storage Structure:
@@ -575,126 +611,191 @@ System-wide settings and configuration.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions
+
+    // ---------- Helpers ----------
+    // Roles are always resolved from the trusted /users/{uid} document,
+    // never from client-supplied request data.
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserDoc() {
+      return isAuthenticated() && exists(userDocPath());
+    }
+
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return get(userDocPath()).data.role;
     }
-    
+
     function isOwner() {
-      return getUserRole() == 'owner';
+      return hasUserDoc() && getUserRole() == 'owner';
     }
-    
+
     function isManager() {
-      return getUserRole() == 'manager';
+      return hasUserDoc() && getUserRole() == 'manager';
     }
-    
+
     function isEmployee() {
-      return getUserRole() == 'employee';
+      return hasUserDoc() && getUserRole() == 'employee';
     }
-    
-    // Users collection
+
+    function isStaff() {
+      return isOwner() || isManager();
+    }
+
+    function isKnownRole() {
+      return isOwner() || isManager() || isEmployee();
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ---------- users ----------
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || request.auth.uid == userId;
+      // Only owners may provision accounts or change roles / status.
+      allow create, delete: if isOwner();
+      allow update: if isOwner()
+        || (request.auth.uid == userId
+            && !changedKeys().hasAny(['role', 'isActive', 'email']));
     }
-    
-    // Tasks collection
+
+    // ---------- tasks ----------
     match /tasks/{taskId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
+      allow create, delete: if isStaff();
+      // Employees may only mark a task completed (QR check-in flow).
+      allow update: if isStaff()
+        || (isEmployee()
+            && request.resource.data.status == 'completed'
+            && changedKeys().hasOnly(['status', 'completedAt', 'completedBy']));
     }
-    
-    // Task Submissions
+
+    // ---------- taskSubmissions ----------
     match /taskSubmissions/{submissionId} {
       allow read: if isAuthenticated();
-      allow create: if isEmployee() && request.auth.uid == request.resource.data.employeeId;
-      allow update: if isOwner() || isManager(); // For verification
-      allow delete: if isOwner();
+      allow create: if isStaff()
+        || (isEmployee() && request.resource.data.employeeId == request.auth.uid);
+      allow update, delete: if isStaff();
     }
-    
-    // Employees
+
+    // ---------- employees ----------
     match /employees/{employeeId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
+      allow write: if isStaff();
     }
-    
-    // Inventory
+
+    // ---------- inventory ----------
     match /inventory/{inventoryId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated(); // All can update inventory
-    }
-    
-    // Financial Reports
-    match /financialReports/{reportId} {
-      allow read: if isOwner() || isManager();
-      allow create: if isManager();
-      allow update: if isOwner() || isManager();
-      allow delete: if isOwner();
-    }
-    
-    // APEPO Reports
-    match /apepoReports/{reportId} {
-      allow read: if isOwner() || isManager();
-      allow create: if isManager();
-      allow update: if isOwner() || isManager();
-      allow delete: if isOwner();
-    }
-    
-    // Requests
-    match /requests/{requestId} {
-      allow read: if isOwner() || isManager();
-      allow create: if isManager();
-      allow update: if isOwner() || isManager();
-      allow delete: if isOwner();
-    }
-    
-    // Payroll
-    match /payroll/{payrollId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
-    }
-    
-    // Manager Tasks
-    match /managerTasks/{managerTaskId} {
-      allow read: if isOwner() || isManager();
-      allow create: if isOwner();
-      allow update: if isOwner() || (isManager() && request.auth.uid == resource.data.assignedTo);
-      allow delete: if isOwner();
-    }
-    
-    // Recipes
-    match /recipes/{recipeId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner() || isManager();
-      
-      match /views/{viewId} {
+      // Employees submit station counts; only staff may remove items.
+      allow create, update: if isKnownRole();
+      allow delete: if isStaff();
+
+      match /history/{historyId} {
         allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
+        // Audit log: append-only.
+        allow create: if isKnownRole();
+        allow update, delete: if false;
       }
     }
-    
-    // Notifications
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
-      allow update: if isAuthenticated() && request.auth.uid == resource.data.recipientId;
-      allow create, delete: if isOwner() || isManager();
+
+    // ---------- reports / requests ----------
+    match /financialReports/{reportId} {
+      allow read, write: if isStaff();
     }
-    
-    // Branches
+
+    match /apepoReports/{reportId} {
+      allow read, write: if isStaff();
+    }
+
+    match /requests/{requestId} {
+      allow read, write: if isStaff();
+    }
+
+    // ---------- payroll ----------
+    match /payroll/{payrollId} {
+      // Employees may see their own payroll; staff see all.
+      allow read: if isStaff()
+        || (isAuthenticated() && resource.data.employeeId == request.auth.uid);
+      allow write: if isStaff();
+    }
+
+    // ---------- managerTasks ----------
+    match /managerTasks/{managerTaskId} {
+      allow read, write: if isStaff();
+    }
+
+    // ---------- recipes ----------
+    match /recipes/{recipeId} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+
+      match /views/{viewId} {
+        allow read, create: if isAuthenticated();
+        allow update, delete: if isStaff();
+      }
+    }
+
+    // ---------- notifications ----------
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
+      // Recipients may only toggle read state.
+      allow update: if isAuthenticated()
+        && resource.data.recipientId == request.auth.uid
+        && changedKeys().hasOnly(['read', 'readAt']);
+      allow create, delete: if isStaff();
+    }
+
+    // ---------- branches / settings ----------
     match /branches/{branchId} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
     }
-    
-    // Settings
+
     match /settings/{document=**} {
       allow read: if isAuthenticated();
       allow write: if isOwner();
+    }
+
+    // ---------- products / ingredients ----------
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+
+      match /ingredients/{ingredientId} {
+        allow read: if isAuthenticated();
+        allow write: if isOwner();
+      }
+    }
+
+    match /ingredients/{ingredientId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner();
+    }
+
+    // ---------- cupInventoryRecords ----------
+    match /cupInventoryRecords/{recordId} {
+      allow read: if isAuthenticated();
+      // Team members submit counts; managers/owners review and adjust.
+      allow create, update: if isKnownRole();
+      // No hard deletes from dashboards.
+      allow delete: if false;
+    }
+
+    // ---------- emailQueue (Cloud Functions / Admin SDK only) ----------
+    match /emailQueue/{mailId} {
+      allow read, write: if false;
+    }
+
+    // Deny everything not explicitly matched above.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
@@ -705,34 +806,65 @@ service cloud.firestore {
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    // Roles come from the trusted Firestore /users/{uid} document.
+    function getUserRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isStaff() {
+      return isAuthenticated() && (getUserRole() == 'owner' || getUserRole() == 'manager');
+    }
+
+    // Deletes carry no request.resource; uploads must be a bounded image/PDF.
+    function isDelete() {
+      return request.resource == null;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isPdf() {
+      return request.resource.contentType == 'application/pdf';
+    }
+
+    function underSizeMb(maxMb) {
+      return request.resource.size < maxMb * 1024 * 1024;
+    }
+
     match /taskSubmissions/{userId}/{submissionId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated()
+        && request.auth.uid == userId
+        && (isDelete() || (isImage() && underSizeMb(10)));
     }
-    
+
     match /financialReports/{reportId}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isStaff();
+      allow write: if isStaff()
+        && (isDelete() || ((isImage() || isPdf()) && underSizeMb(20)));
     }
-    
+
     match /inventory/{inventoryId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated()
+        && (isDelete() || (isImage() && underSizeMb(10)));
     }
-    
+
     match /recipes/{recipeId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isStaff()
+        && (isDelete() || ((isImage() || isPdf()) && underSizeMb(20)));
     }
-    
+
+    // Deny everything not explicitly matched above.
     match /{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read, write: if false;
     }
   }
 }
@@ -768,28 +900,17 @@ Consider implementing these Cloud Functions:
 
 ## Composite Indexes Required
 
-Run these in Firebase Console or via Firebase CLI:
+Composite indexes are declared in `firestore.indexes.json` and deployed with
+`firebase deploy --only firestore:indexes`. Current indexes:
 
-```bash
-# Task Submissions
-firestore.createIndex('taskSubmissions', [
-  { field: 'employeeId', order: 'ASCENDING' },
-  { field: 'date', order: 'DESCENDING' }
-])
-
-# Inventory
-firestore.createIndex('inventory', [
-  { field: 'station', order: 'ASCENDING' },
-  { field: 'status', order: 'ASCENDING' }
-])
-
-# Notifications
-firestore.createIndex('notifications', [
-  { field: 'recipientId', order: 'ASCENDING' },
-  { field: 'read', order: 'ASCENDING' },
-  { field: 'createdAt', order: 'DESCENDING' }
-])
-```
+| Collection | Fields |
+|---|---|
+| `notifications` | `recipientId` ASC, `read` ASC, `createdAt` DESC |
+| `payroll` | `employeeId` ASC, `periodEnd` ASC |
+| `requests` | `status` ASC, `submittedAt` ASC |
+| `taskSubmissions` | `employeeId` ASC, `date` DESC |
+| `taskSubmissions` | `station` ASC, `category` ASC, `date` DESC |
+| `taskSubmissions` | `station` ASC, `timestamp` DESC |
 
 ---
 

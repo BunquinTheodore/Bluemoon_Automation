@@ -2,21 +2,39 @@
  * Google Sheets API Integration with Google Identity Services (GIS)
  *
  * Provides OAuth authentication and export functionality for financial reports
- * to Google Sheets using the new GIS library (replaces deprecated gapi.auth2).
- *
- * Migration from gapi.auth2 to Google Identity Services completed.
+ * to Google Sheets using the GIS token client (gapi.auth2 is deprecated).
  */
 
 /// <reference types="gapi" />
 /// <reference types="gapi.client.sheets" />
 
-// Add global type declaration for Google Identity Services
+// Minimal typings for the GIS OAuth2 token client
+interface GisTokenResponse {
+  access_token?: string;
+  expires_in?: number | string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GisTokenClient {
+  callback: (response: GisTokenResponse) => void;
+  error_callback?: (error: { type?: string; message?: string }) => void;
+  requestAccessToken: (overrides?: { prompt?: string }) => void;
+}
+
+interface GisTokenClientConfig {
+  client_id: string;
+  scope: string;
+  callback: (response: GisTokenResponse) => void;
+  error_callback?: (error: { type?: string; message?: string }) => void;
+}
+
 declare global {
   interface Window {
     google?: {
       accounts: {
         oauth2: {
-          initTokenClient: (config: any) => any;
+          initTokenClient: (config: GisTokenClientConfig) => GisTokenClient;
           revoke: (accessToken: string, callback?: () => void) => void;
         };
       };
@@ -25,13 +43,16 @@ declare global {
 }
 
 // Environment variables
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID;
-const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID;
+const CLIENT_ID: string | undefined = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID;
+const SHEET_ID: string | undefined = import.meta.env.VITE_GOOGLE_SHEET_ID;
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 const DISCOVERY_DOCS = ['https://sheets.googleapis.com/$discovery/rest?version=v4'];
+const DEFAULT_TOKEN_LIFETIME_SECONDS = 3600;
+// Treat the token as expired slightly early so a request never races expiry.
+const EXPIRY_SAFETY_MARGIN_MS = 60 * 1000;
 
 // Token client and access token (GIS)
-let tokenClient: any = null;
+let tokenClient: GisTokenClient | null = null;
 let accessToken: string | null = null;
 
 // LocalStorage keys for token persistence
@@ -40,30 +61,56 @@ const STORAGE_KEYS = {
   TOKEN_EXPIRY: 'google_sheets_token_expiry',
 };
 
+function safeStorageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage unavailable (private mode, quota) - token stays in memory only
+  }
+}
+
+function safeStorageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Save access token to localStorage with expiry timestamp
  */
-function saveToken(token: string): void {
-  const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
-  localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, token);
-  localStorage.setItem(STORAGE_KEYS.TOKEN_EXPIRY, expiryTime.toString());
-  console.log('Token saved to localStorage, expires:', new Date(expiryTime).toLocaleString());
+function saveToken(token: string, expiresInSeconds: number): void {
+  const lifetime =
+    Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+      ? expiresInSeconds
+      : DEFAULT_TOKEN_LIFETIME_SECONDS;
+  const expiryTime = Date.now() + lifetime * 1000 - EXPIRY_SAFETY_MARGIN_MS;
+  safeStorageSet(STORAGE_KEYS.ACCESS_TOKEN, token);
+  safeStorageSet(STORAGE_KEYS.TOKEN_EXPIRY, expiryTime.toString());
 }
 
 /**
  * Load access token from localStorage (returns null if expired or missing)
  */
 function loadToken(): string | null {
-  const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-  const expiry = localStorage.getItem(STORAGE_KEYS.TOKEN_EXPIRY);
+  const token = safeStorageGet(STORAGE_KEYS.ACCESS_TOKEN);
+  const expiry = safeStorageGet(STORAGE_KEYS.TOKEN_EXPIRY);
 
   if (!token || !expiry) {
     return null;
   }
 
-  // Check if token is expired
-  if (Date.now() >= parseInt(expiry)) {
-    console.log('Token expired, clearing localStorage');
+  const expiryMs = Number(expiry);
+  if (!Number.isFinite(expiryMs) || Date.now() >= expiryMs) {
     clearToken();
     return null;
   }
@@ -75,17 +122,23 @@ function loadToken(): string | null {
  * Clear stored token from localStorage
  */
 function clearToken(): void {
-  localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-  localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
-  console.log('Token cleared from localStorage');
+  safeStorageRemove(STORAGE_KEYS.ACCESS_TOKEN);
+  safeStorageRemove(STORAGE_KEYS.TOKEN_EXPIRY);
 }
 
 /**
- * Check if a valid token exists in localStorage
+ * Drop the current token everywhere (memory, storage, gapi client)
  */
-function isTokenValid(): boolean {
-  const token = loadToken();
-  return token !== null;
+function invalidateToken(): void {
+  accessToken = null;
+  clearToken();
+  if (typeof gapi !== 'undefined' && gapi.client) {
+    gapi.client.setToken(null);
+  }
+}
+
+function isGapiClientReady(): boolean {
+  return typeof gapi !== 'undefined' && !!gapi.client;
 }
 
 // Financial Report interface (matches Firestore structure)
@@ -122,71 +175,80 @@ export interface FinancialReport {
   };
   expenses: string;
   status: string;
-  submittedAt: any;
+  submittedAt: unknown;
 }
 
 /**
- * Load Google API script (gapi)
+ * Load an external script once, resolving when it is available
  */
-async function loadGapiScript(): Promise<void> {
+function loadScript(src: string, isLoaded: () => boolean, errorMessage: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Check if already loaded
-    if (typeof gapi !== 'undefined') {
+    if (isLoaded()) {
       resolve();
       return;
     }
 
-    const script = document.createElement('script');
-    script.src = 'https://apis.google.com/js/api.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Google API script'));
-    document.body.appendChild(script);
-  });
-}
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+    const script = existing ?? document.createElement('script');
 
-/**
- * Load Google Identity Services script (GIS)
- */
-async function loadGISScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // Check if already loaded
-    if (window.google?.accounts) {
-      resolve();
-      return;
+    const onLoad = () => resolve();
+    const onError = () => reject(new Error(errorMessage));
+    script.addEventListener('load', onLoad, { once: true });
+    script.addEventListener('error', onError, { once: true });
+
+    if (!existing) {
+      script.src = src;
+      script.async = true;
+      document.body.appendChild(script);
     }
-
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-    document.body.appendChild(script);
   });
 }
 
+function loadGapiScript(): Promise<void> {
+  return loadScript(
+    'https://apis.google.com/js/api.js',
+    () => typeof gapi !== 'undefined',
+    'Failed to load Google API script'
+  );
+}
+
+function loadGISScript(): Promise<void> {
+  return loadScript(
+    'https://accounts.google.com/gsi/client',
+    () => !!window.google?.accounts,
+    'Failed to load Google Identity Services'
+  );
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  if (error && typeof error === 'object') {
+    const e = error as { message?: string; result?: { error?: { message?: string } } };
+    return e.result?.error?.message || e.message || fallback;
+  }
+  return fallback;
+}
+
 /**
- * Initialize Google API client (NEW: GIS-based)
+ * Initialize Google API client (GIS-based)
  */
 export async function initializeGoogleAPI(): Promise<void> {
   try {
-    // Check if environment variables are configured
     if (!CLIENT_ID || !SHEET_ID) {
-      const missingVars = [];
+      const missingVars: string[] = [];
       if (!CLIENT_ID) missingVars.push('VITE_GOOGLE_OAUTH_CLIENT_ID');
       if (!SHEET_ID) missingVars.push('VITE_GOOGLE_SHEET_ID');
       throw new Error(`Missing environment variables: ${missingVars.join(', ')}`);
     }
 
-    // Step 1: Load gapi script
     await loadGapiScript();
 
-    // Step 2: Initialize gapi client (WITHOUT auth - important!)
+    // Initialize gapi client without auth (GIS handles auth)
     await new Promise<void>((resolve, reject) => {
       gapi.load('client', async () => {
         try {
-          // Initialize WITHOUT clientId and scope (GIS handles auth)
-          await gapi.client.init({
-            discoveryDocs: DISCOVERY_DOCS,
-          });
+          await gapi.client.init({ discoveryDocs: DISCOVERY_DOCS });
           resolve();
         } catch (error) {
           reject(error);
@@ -194,67 +256,63 @@ export async function initializeGoogleAPI(): Promise<void> {
       });
     });
 
-    // Step 3: Load GIS script
     await loadGISScript();
 
-    // Step 4: Initialize token client (GIS)
     if (!window.google?.accounts) {
       throw new Error('Google Identity Services not loaded');
     }
 
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: '', // Will be set dynamically in signInToGoogle
-    });
+    if (!tokenClient) {
+      tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        // Replaced per request in signInToGoogle
+        callback: () => undefined,
+      });
+    }
 
-    // Try to load stored token from localStorage
     const storedToken = loadToken();
     if (storedToken) {
       accessToken = storedToken;
       gapi.client.setToken({ access_token: storedToken });
-      console.log('Restored token from localStorage');
-    } else {
-      console.log('No stored token found');
     }
-
-    console.log('Google API initialized successfully with GIS');
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error initializing Google API:', error);
     throw new Error(
-      error.message || 'Failed to initialize Google Sheets API. Please check your configuration.'
+      getErrorMessage(
+        error,
+        'Failed to initialize Google Sheets API. Please check your configuration.'
+      )
     );
   }
 }
 
 /**
- * Check if user is authenticated (has valid access token)
+ * Check if user is authenticated (has a non-expired access token)
  */
 export function isAuthenticated(): boolean {
-  // Check memory first
-  if (accessToken !== null && accessToken !== '') {
-    return true;
-  }
-
-  // Check localStorage if memory is empty
   const storedToken = loadToken();
-  if (storedToken) {
-    accessToken = storedToken;
-    gapi.client.setToken({ access_token: storedToken });
-    return true;
+  if (!storedToken) {
+    // Storage is the source of truth for expiry; drop any stale in-memory token
+    accessToken = null;
+    return false;
   }
 
-  return false;
+  if (accessToken !== storedToken) {
+    accessToken = storedToken;
+    if (isGapiClientReady()) {
+      gapi.client.setToken({ access_token: storedToken });
+    }
+  }
+  return true;
 }
 
 /**
- * Sign in to Google (triggers OAuth popup) - NEW: GIS-based with token persistence
+ * Sign in to Google (triggers OAuth popup) with token persistence
  */
 export async function signInToGoogle(): Promise<void> {
-  // First, check if we already have a valid token
-  if (isTokenValid() && accessToken) {
-    console.log('Using existing valid token from localStorage');
-    return; // Skip OAuth popup
+  if (isAuthenticated()) {
+    return; // Valid token already available - skip OAuth popup
   }
 
   return new Promise((resolve, reject) => {
@@ -263,63 +321,61 @@ export async function signInToGoogle(): Promise<void> {
       return;
     }
 
-    try {
-      // Set callback for token response
-      tokenClient.callback = async (tokenResponse: any) => {
-        if (tokenResponse.error) {
-          reject(new Error(tokenResponse.error));
-          return;
-        }
-
-        // Store access token in memory
-        accessToken = tokenResponse.access_token;
-
-        // Save token to localStorage
-        saveToken(tokenResponse.access_token);
-
-        // Set token for gapi client
-        gapi.client.setToken({
-          access_token: tokenResponse.access_token,
-        });
-
-        console.log('Successfully signed in with Google and saved token');
-        resolve();
-      };
-
-      // Request access token (triggers OAuth popup)
-      tokenClient.requestAccessToken({ prompt: '' });
-    } catch (error: any) {
-      if (error.message && error.message.includes('popup')) {
-        reject(new Error('Popup blocked. Please allow popups for this site.'));
-      } else {
-        reject(new Error(error.message || 'Failed to sign in with Google'));
+    tokenClient.callback = (tokenResponse) => {
+      if (tokenResponse.error || !tokenResponse.access_token) {
+        reject(
+          new Error(
+            tokenResponse.error_description ||
+              tokenResponse.error ||
+              'Google did not return an access token'
+          )
+        );
+        return;
       }
+
+      accessToken = tokenResponse.access_token;
+      saveToken(tokenResponse.access_token, Number(tokenResponse.expires_in));
+      if (isGapiClientReady()) {
+        gapi.client.setToken({ access_token: tokenResponse.access_token });
+      }
+      resolve();
+    };
+
+    // Fires when the popup is blocked or closed without completing sign-in
+    tokenClient.error_callback = (error) => {
+      if (error?.type === 'popup_failed_to_open') {
+        reject(new Error('Popup blocked. Please allow popups for this site.'));
+      } else if (error?.type === 'popup_closed') {
+        reject(new Error('Sign-in cancelled'));
+      } else {
+        reject(new Error(error?.message || 'Failed to sign in with Google'));
+      }
+    };
+
+    try {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch (error) {
+      const message = getErrorMessage(error, 'Failed to sign in with Google');
+      reject(
+        new Error(
+          message.toLowerCase().includes('popup')
+            ? 'Popup blocked. Please allow popups for this site.'
+            : message
+        )
+      );
     }
   });
 }
 
 /**
- * Sign out from Google - NEW: GIS-based with token persistence
+ * Sign out from Google and clear the persisted token
  */
 export async function signOut(): Promise<void> {
   try {
     if (accessToken && window.google?.accounts) {
-      // Revoke the token
-      window.google.accounts.oauth2.revoke(accessToken, () => {
-        console.log('Token revoked successfully');
-      });
+      window.google.accounts.oauth2.revoke(accessToken);
     }
-
-    // Clear memory
-    accessToken = null;
-
-    // Clear localStorage
-    clearToken();
-
-    // Clear gapi token
-    gapi.client.setToken(null as any);
-
-    console.log('Signed out and cleared stored token');
+    invalidateToken();
   } catch (error) {
     console.error('Error signing out:', error);
     throw new Error('Failed to sign out');
@@ -330,14 +386,16 @@ export async function signOut(): Promise<void> {
  * Calculate financial totals from report
  */
 function calculateTotals(report: FinancialReport) {
-  const openingCashTotal = report.opening.cash + report.opening.turnoverCash;
-  const openingDigitalTotal = report.opening.digitalWallet + report.opening.turnoverDigital;
-  const openingBankTotal = report.opening.bank + report.opening.turnoverBank;
+  const n = (value: number | undefined | null) => (Number.isFinite(value) ? (value as number) : 0);
+
+  const openingCashTotal = n(report.opening.cash) + n(report.opening.turnoverCash);
+  const openingDigitalTotal = n(report.opening.digitalWallet) + n(report.opening.turnoverDigital);
+  const openingBankTotal = n(report.opening.bank) + n(report.opening.turnoverBank);
   const openingTotal = openingCashTotal + openingDigitalTotal + openingBankTotal;
 
-  const closingCashTotal = report.closing.cash + report.closing.turnoverCash;
-  const closingDigitalTotal = report.closing.digitalWallet + report.closing.turnoverDigital;
-  const closingBankTotal = report.closing.bank + report.closing.turnoverBank;
+  const closingCashTotal = n(report.closing.cash) + n(report.closing.turnoverCash);
+  const closingDigitalTotal = n(report.closing.digitalWallet) + n(report.closing.turnoverDigital);
+  const closingBankTotal = n(report.closing.bank) + n(report.closing.turnoverBank);
   const closingTotal = closingCashTotal + closingDigitalTotal + closingBankTotal;
 
   const dailyEarnings = openingTotal + closingTotal;
@@ -360,7 +418,7 @@ function calculateTotals(report: FinancialReport) {
 /**
  * Format financial report into row array (31 columns)
  */
-export function formatReportToRow(report: FinancialReport): any[] {
+export function formatReportToRow(report: FinancialReport): (string | number)[] {
   const totals = calculateTotals(report);
 
   return [
@@ -398,21 +456,25 @@ export function formatReportToRow(report: FinancialReport): any[] {
   ];
 }
 
+function getHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const e = error as { status?: number; result?: { error?: { code?: number } } };
+  return e.status ?? e.result?.error?.code;
+}
+
 /**
  * Check if report already exists in Google Sheets (duplicate detection)
  */
 export async function checkDuplicateReport(date: string): Promise<boolean> {
   try {
-    // Ensure we have a valid token
-    if (!accessToken) {
+    if (!isAuthenticated() || !accessToken) {
       throw new Error('Not authenticated');
     }
 
-    // Set token before API call
     gapi.client.setToken({ access_token: accessToken });
 
     const response = await gapi.client.sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: SHEET_ID as string,
       range: 'Financial Reports!A:A', // Check Date column only
     });
 
@@ -425,6 +487,11 @@ export async function checkDuplicateReport(date: string): Promise<boolean> {
     const dates = values.slice(1).flat();
     return dates.includes(date);
   } catch (error) {
+    const status = getHttpStatus(error);
+    if (status === 401 || status === 403) {
+      // Let the caller surface the auth failure instead of silently exporting
+      throw error;
+    }
     console.error('Error checking for duplicates:', error);
     // If we can't check, assume no duplicate to allow export
     return false;
@@ -436,20 +503,12 @@ export async function checkDuplicateReport(date: string): Promise<boolean> {
  */
 export async function exportReportToSheets(report: FinancialReport): Promise<void> {
   try {
-    // Check authentication
-    if (!isAuthenticated()) {
+    if (!isAuthenticated() || !accessToken) {
       throw new Error('Not authenticated. Please sign in first.');
     }
 
-    // Ensure token is set
-    if (!accessToken) {
-      throw new Error('No access token available');
-    }
-
-    // Set token before API calls
     gapi.client.setToken({ access_token: accessToken });
 
-    // Check for duplicates
     const isDuplicate = await checkDuplicateReport(report.date);
     if (isDuplicate) {
       const confirmed = window.confirm(
@@ -460,12 +519,10 @@ export async function exportReportToSheets(report: FinancialReport): Promise<voi
       }
     }
 
-    // Format report data
     const rowData = formatReportToRow(report);
 
-    // Append to Google Sheets
     const response = await gapi.client.sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: SHEET_ID as string,
       range: 'Financial Reports!A:AE',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
@@ -474,32 +531,33 @@ export async function exportReportToSheets(report: FinancialReport): Promise<voi
       },
     });
 
-    console.log('Export successful:', response);
-
     if (!response.result.updates) {
       throw new Error('Failed to append data to sheet');
     }
-  } catch (error: any) {
+  } catch (error) {
+    const message = getErrorMessage(error, 'Failed to export to Google Sheets');
+    if (message === 'Export cancelled - duplicate report') {
+      throw error; // User cancellation, not a failure
+    }
+
     console.error('Error exporting to Google Sheets:', error);
 
-    // Handle specific error cases
-    if (error.status === 401 || error.status === 403) {
-      // Token might be invalid - clear stored token
-      console.log('Token invalid (401/403), clearing localStorage');
-      clearToken();
-      accessToken = null;
+    const status = getHttpStatus(error);
+    if (status === 401 || status === 403) {
+      // Token invalid or expired - force re-authentication next time
+      invalidateToken();
       throw new Error('Access denied. Please re-authenticate.');
-    } else if (error.status === 404) {
-      throw new Error('Google Sheet not found. Please check the Sheet ID.');
-    } else if (error.status === 429) {
-      throw new Error('Too many requests. Please wait a minute and try again.');
-    } else if (!navigator.onLine) {
-      throw new Error('No internet connection. Please check your network.');
-    } else if (error.message === 'Export cancelled - duplicate report') {
-      throw error; // Re-throw cancellation
-    } else {
-      throw new Error(error.message || 'Failed to export to Google Sheets');
     }
+    if (status === 404) {
+      throw new Error('Google Sheet not found. Please check the Sheet ID.');
+    }
+    if (status === 429) {
+      throw new Error('Too many requests. Please wait a minute and try again.');
+    }
+    if (!navigator.onLine) {
+      throw new Error('No internet connection. Please check your network.');
+    }
+    throw new Error(message);
   }
 }
 
@@ -507,5 +565,5 @@ export async function exportReportToSheets(report: FinancialReport): Promise<voi
  * Get the Google Sheet URL for direct access
  */
 export function getSheetUrl(): string {
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID ?? ''}/edit`;
 }

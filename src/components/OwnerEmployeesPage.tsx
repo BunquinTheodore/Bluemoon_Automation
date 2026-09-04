@@ -23,44 +23,70 @@ interface Employee {
   status: 'full-time' | 'part-time';
   birthday: string;
   joinDate: string;
+  isActive: boolean;
 }
+
+const getInitials = (name: string) =>
+  name
+    .split(' ')
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase();
 
 export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch employees from Firestore
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
-      const loadedEmployees: Employee[] = snapshot.docs
-        .map((docSnap) => {
-          const data = docSnap.data();
+    const unsubscribe = onSnapshot(
+      collection(db, 'employees'),
+      (snapshot) => {
+        const loadedEmployees: Employee[] = snapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
 
-          // Format join date
-          let joinDateStr = 'N/A';
-          if (data.joinDate) {
-            const joinDate = typeof data.joinDate === 'string'
-              ? new Date(data.joinDate)
-              : data.joinDate.toDate ? data.joinDate.toDate() : new Date();
-            joinDateStr = joinDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          }
+            // Format join date
+            let joinDateStr = 'N/A';
+            if (data.joinDate) {
+              const joinDate: Date =
+                typeof data.joinDate === 'string'
+                  ? new Date(data.joinDate)
+                  : typeof data.joinDate.toDate === 'function'
+                  ? data.joinDate.toDate()
+                  : new Date(NaN);
+              if (!Number.isNaN(joinDate.getTime())) {
+                joinDateStr = joinDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              }
+            }
 
-          return {
-            id: docSnap.id,
-            name: data.name || '',
-            email: data.email || '',
-            contactNumber: data.contactNumber || '',
-            position: data.position || '',
-            status: (data.status === 'part-time' ? 'part-time' : 'full-time') as 'full-time' | 'part-time',
-            birthday: data.birthday || '',
-            joinDate: joinDateStr,
-          };
-        })
-        .filter((emp) => emp.isActive !== false && emp.name.trim().length > 0);
+            return {
+              id: docSnap.id,
+              name: typeof data.name === 'string' ? data.name : '',
+              email: typeof data.email === 'string' ? data.email : '',
+              contactNumber: typeof data.contactNumber === 'string' ? data.contactNumber : '',
+              position: typeof data.position === 'string' ? data.position : '',
+              status: (data.status === 'part-time' ? 'part-time' : 'full-time') as 'full-time' | 'part-time',
+              birthday: typeof data.birthday === 'string' ? data.birthday : '',
+              joinDate: joinDateStr,
+              isActive: data.isActive !== false,
+            };
+          })
+          .filter((emp) => emp.isActive && emp.name.trim().length > 0)
+          .sort((a, b) => a.name.localeCompare(b.name));
 
-      setEmployees(loadedEmployees);
-      setLoading(false);
-    });
+        setEmployees(loadedEmployees);
+        setError(null);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error loading employees', err);
+        setError('Failed to load employees. Please try again later.');
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
@@ -103,9 +129,11 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Loading State */}
         {loading ? (
-          <div className="flex justify-center items-center py-12">
+          <div className="flex justify-center items-center py-12" role="status" aria-label="Loading employees">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
           </div>
+        ) : error ? (
+          <div className="text-center py-12 text-red-600">{error}</div>
         ) : (
           <>
         {/* Summary Stats */}
@@ -154,6 +182,13 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
         </div>
 
         {/* Employee Cards - Mobile Friendly */}
+        {employees.length === 0 && (
+          <div className="text-center py-12 text-gray-500">
+            <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No active employees found</p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 md:hidden">
           {employees.map((employee, index) => (
             <motion.div
@@ -167,7 +202,7 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                   <div className="flex items-start gap-3 mb-4">
                     <Avatar className="w-12 h-12">
                       <AvatarFallback className="bg-cyan-600 text-white">
-                        {employee.name.split(' ').map(n => n[0]).join('')}
+                        {getInitials(employee.name)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
@@ -227,7 +262,7 @@ export function OwnerEmployeesPage({ onBack, onLogout }: OwnerEmployeesPageProps
                         <div className="flex items-center gap-3">
                           <Avatar className="w-8 h-8">
                             <AvatarFallback className="bg-cyan-600 text-white text-xs">
-                              {employee.name.split(' ').map(n => n[0]).join('')}
+                              {getInitials(employee.name)}
                             </AvatarFallback>
                           </Avatar>
                           <span>{employee.name}</span>
